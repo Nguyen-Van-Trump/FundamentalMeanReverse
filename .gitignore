@@ -1,0 +1,22 @@
+# Môi trường ảo
+venv/
+env/
+ENV/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# File dữ liệu (nếu có)
+*.csv
+*.xlsx
+*.pickle
+
+# File cấu hình cá nhân
+.vscode/
+.idea/
