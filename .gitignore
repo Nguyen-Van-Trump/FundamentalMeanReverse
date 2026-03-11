@@ -12,11 +12,29 @@ __pycache__/
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/
 
-# File dữ liệu (nếu có)
-*.csv
+# IDE
+.vscode/
+.idea/
+
+# -------------------------------------------------
+# Data files
+# -------------------------------------------------
+
+# CSV / Excel
 *.xlsx
 *.pickle
 
-# File cấu hình cá nhân
-.vscode/
-.idea/
+# Parquet
+*.parquet
+
+# Raw downloaded market data
+data/raw/
+data/processed/
+# Parquet market dataset
+data/market/
+
+# Fetcher checkpoint
+data/last_symbol.txt
+
+# Optional logs
+logs/
