@@ -1,8 +1,12 @@
 """
-Global configuration for the FundamentalMeanReverse project.
+Production configuration for the VN stock data pipeline.
 
-Loads environment variables from .env automatically and exposes
-configuration values used across the data pipeline.
+Responsibilities
+----------------
+• Load environment variables
+• Define dataset paths
+• Define API / runtime configuration
+• Ensure required directories exist
 """
 
 from pathlib import Path
@@ -12,42 +16,44 @@ from dotenv import load_dotenv
 
 
 # --------------------------------------------------
+# Project root
+# --------------------------------------------------
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+# --------------------------------------------------
 # Load environment variables
 # --------------------------------------------------
 
-# locate project root
-BASE_DIR = Path(__file__).resolve().parent.parent
+ENV_FILE = BASE_DIR / ".env"
 
-# load .env file from project root
-load_dotenv(BASE_DIR / ".env")
+if ENV_FILE.exists():
+    load_dotenv(ENV_FILE)
 
 
 # --------------------------------------------------
-# Paths
+# Core project directories
 # --------------------------------------------------
 
 DATA_DIR = BASE_DIR / "data"
 
 RAW_DATA_DIR = DATA_DIR / "raw"
+PROCESSED_DATA_DIR = DATA_DIR / "processed"
 
-# parquet dataset
 MARKET_DATA_DIR = DATA_DIR / "market"
-
-SYMBOL_FILE = DATA_DIR / "symbols.csv"
-
-FETCH_CHECKPOINT_FILE = DATA_DIR / "last_symbol.txt"
+RATIO_DATA_DIR = DATA_DIR / "ratio"
 
 LOG_DIR = BASE_DIR / "logs"
 
 
 # --------------------------------------------------
-# Dataset structure
+# Files
 # --------------------------------------------------
-# data/
-# └── market/
-#     ├── symbol=AAA/data.parquet
-#     ├── symbol=HPG/data.parquet
-#     └── symbol=FPT/data.parquet
+
+SYMBOL_FILE = DATA_DIR / "symbols.csv"
+
+MARKET_CHECKPOINT_FILE = DATA_DIR / "last_symbol.txt"
+RATIO_CHECKPOINT_FILE = DATA_DIR / "ratio_last_symbol.txt"
 
 
 # --------------------------------------------------
@@ -56,23 +62,26 @@ LOG_DIR = BASE_DIR / "logs"
 
 DATA_SOURCE = os.getenv("VNSTOCK_SOURCE", "VCI")
 
-# Optional API key (if using paid endpoints)
-VNSTOCK_API_KEY = os.getenv("VNSTOCK_API_KEY", "")
+VNSTOCK_API_KEY = os.getenv("VNSTOCK_API_KEY")
+
+# Validate API key (optional)
+if VNSTOCK_API_KEY is None:
+    print("Warning: VNSTOCK_API_KEY not set (some features may not work)")
 
 
 # --------------------------------------------------
-# Fetch settings
+# Data collection configuration
 # --------------------------------------------------
 
 DEFAULT_HISTORY_START = "2015-01-01"
 
-FETCH_SLEEP_SECONDS = float(os.getenv("FETCH_SLEEP_SECONDS", 1.8))
+FETCH_SLEEP_SECONDS = float(os.getenv("FETCH_SLEEP_SECONDS", 0.35))
 
-RATE_LIMIT_COOLDOWN = int(os.getenv("RATE_LIMIT_COOLDOWN", 12))
+RATE_LIMIT_COOLDOWN = int(os.getenv("RATE_LIMIT_COOLDOWN", 10))
 
 
 # --------------------------------------------------
-# Parquet settings
+# Dataset configuration
 # --------------------------------------------------
 
 PARQUET_ENGINE = "pyarrow"
@@ -81,9 +90,18 @@ PARQUET_COMPRESSION = "snappy"
 
 TIME_COLUMN = "time"
 
+PRICE_COLUMNS = [
+    "time",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+]
+
 
 # --------------------------------------------------
-# Safety update logic
+# Market update logic
 # --------------------------------------------------
 
 TODAY = date.today()
@@ -92,10 +110,24 @@ SAFE_UPDATE_LOOKBACK_DAYS = 5
 
 
 # --------------------------------------------------
-# Create directories automatically
+# Logging
 # --------------------------------------------------
 
-DATA_DIR.mkdir(exist_ok=True)
-RAW_DATA_DIR.mkdir(exist_ok=True)
-MARKET_DATA_DIR.mkdir(exist_ok=True)
-LOG_DIR.mkdir(exist_ok=True)
+LOG_FILE = LOG_DIR / "pipeline.log"
+
+
+# --------------------------------------------------
+# Directory initialization
+# --------------------------------------------------
+
+DIRECTORIES = [
+    DATA_DIR,
+    RAW_DATA_DIR,
+    PROCESSED_DATA_DIR,
+    MARKET_DATA_DIR,
+    RATIO_DATA_DIR,
+    LOG_DIR,
+]
+
+for directory in DIRECTORIES:
+    directory.mkdir(parents=True, exist_ok=True)

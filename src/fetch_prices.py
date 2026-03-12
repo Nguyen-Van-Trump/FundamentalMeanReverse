@@ -4,7 +4,7 @@ from pathlib import Path
 from datetime import datetime, timedelta, date
 import time
 from vnstock import register_user
-from config.settings import (MARKET_DATA_DIR, SYMBOL_FILE, FETCH_CHECKPOINT_FILE, DATA_SOURCE, FETCH_SLEEP_SECONDS,
+from config.settings import (MARKET_DATA_DIR, SYMBOL_FILE, MARKET_CHECKPOINT_FILE, DATA_SOURCE, FETCH_SLEEP_SECONDS,
                              RATE_LIMIT_COOLDOWN, DEFAULT_HISTORY_START, TIME_COLUMN, VNSTOCK_API_KEY)
 
 
@@ -25,14 +25,14 @@ def load_symbols():
 
 def load_checkpoint():
 
-    if not FETCH_CHECKPOINT_FILE.exists():
+    if not MARKET_CHECKPOINT_FILE.exists():
         return None
 
-    return FETCH_CHECKPOINT_FILE.read_text().strip()
+    return MARKET_CHECKPOINT_FILE.read_text().strip()
 
 
 def save_checkpoint(symbol):
-    FETCH_CHECKPOINT_FILE.write_text(symbol)
+    MARKET_CHECKPOINT_FILE.write_text(symbol)
 
 
 # --------------------------------------------------
