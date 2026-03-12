@@ -1,9 +1,11 @@
 from vnstock import Vnstock
 import pandas as pd
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import time
-from config.settings import DATA_DIR, MARKET_DATA_DIR, SYMBOL_FILE, FETCH_CHECKPOINT_FILE, DATA_SOURCE, FETCH_SLEEP_SECONDS, RATE_LIMIT_COOLDOWN, DEFAULT_HISTORY_START, TIME_COLUMN
+from vnstock import register_user
+from config.settings import (MARKET_DATA_DIR, SYMBOL_FILE, FETCH_CHECKPOINT_FILE, DATA_SOURCE, FETCH_SLEEP_SECONDS,
+                             RATE_LIMIT_COOLDOWN, DEFAULT_HISTORY_START, TIME_COLUMN, VNSTOCK_API_KEY)
 
 
 # --------------------------------------------------
@@ -70,6 +72,9 @@ def get_last_date(symbol):
 def fetch_symbol(symbol, start_date):
 
     stock = Vnstock().stock(symbol=symbol, source=DATA_SOURCE)
+    
+    if isinstance(start_date, (datetime, date)):
+        start_date = start_date.strftime("%Y-%m-%d")
 
     df = stock.quote.history(start=start_date)
 
@@ -93,6 +98,7 @@ def update_symbol(symbol):
         if start_date >= datetime.today().date():
             print(f"{symbol} already up-to-date")
             return
+        
 
     else:
         start_date = DEFAULT_HISTORY_START
@@ -136,7 +142,7 @@ def update_symbol(symbol):
 # --------------------------------------------------
 
 def main():
-
+    register_user(api_key=VNSTOCK_API_KEY)
     symbols = load_symbols()
 
     last_symbol = load_checkpoint()
@@ -146,9 +152,11 @@ def main():
     if last_symbol and last_symbol in symbols:
         start_index = symbols.index(last_symbol) + 1
 
+    ordered_symbols = symbols[start_index:] + symbols[:start_index]
+
     print(f"Starting from symbol index {start_index}")
 
-    for symbol in symbols[start_index:]:
+    for symbol in ordered_symbols:
 
         try:
 
