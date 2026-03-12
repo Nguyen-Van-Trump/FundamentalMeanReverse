@@ -27,17 +27,10 @@ __pycache__/
 # Parquet
 *.parquet
 
-# Raw downloaded market data
-data/raw/
-data/processed/
-# Parquet market dataset
-data/market/
-
-# Fetcher checkpoint
-data/last_symbol.txt
-
-# Optional logs
+# Ignored folders
+data/
 logs/
+notebooks/
 
 # Environment secrets
 .env
