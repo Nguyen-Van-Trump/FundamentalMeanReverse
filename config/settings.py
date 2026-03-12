@@ -1,120 +1,101 @@
 """
-Global environment configuration for the VN stock data pipeline.
+Global configuration for the FundamentalMeanReverse project.
 
-This module defines paths, dataset structure, and runtime parameters
-used by data collection scripts and strategy modules.
+Loads environment variables from .env automatically and exposes
+configuration values used across the data pipeline.
 """
 
 from pathlib import Path
 from datetime import date
+import os
+from dotenv import load_dotenv
 
-# ---------------------------------------------------
-# Project root
-# ---------------------------------------------------
 
-# Assumes settings.py is located in: project_root/config/settings.py
+# --------------------------------------------------
+# Load environment variables
+# --------------------------------------------------
+
+# locate project root
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# ---------------------------------------------------
-# Data directories
-# ---------------------------------------------------
+# load .env file from project root
+load_dotenv(BASE_DIR / ".env")
+
+
+# --------------------------------------------------
+# Paths
+# --------------------------------------------------
 
 DATA_DIR = BASE_DIR / "data"
 
-# Old CSV storage (used only during migration)
 RAW_DATA_DIR = DATA_DIR / "raw"
 
-# Main parquet dataset
+# parquet dataset
 MARKET_DATA_DIR = DATA_DIR / "market"
-
-# Dataset structure example:
-#
-# data/
-# └── market/
-#     ├── symbol=AAA/
-#     │   └── data.parquet
-#     ├── symbol=AAM/
-#     │   └── data.parquet
-#     └── symbol=FPT/
-#         └── data.parquet
-
-# ---------------------------------------------------
-# Files
-# ---------------------------------------------------
 
 SYMBOL_FILE = DATA_DIR / "symbols.csv"
 
-# Used by fetcher to resume progress
 FETCH_CHECKPOINT_FILE = DATA_DIR / "last_symbol.txt"
-
-# ---------------------------------------------------
-# VNStock configuration
-# ---------------------------------------------------
-
-# Primary price data source
-# Common options: VCI, SSI, TCBS
-DATA_SOURCE = "VCI"
-
-# Default historical fetch start date
-DEFAULT_HISTORY_START = "2015-01-01"
-
-# ---------------------------------------------------
-# Rate limiting controls
-# ---------------------------------------------------
-
-# Normal delay between API calls
-FETCH_SLEEP_SECONDS = 0.35
-
-# Longer cooldown when rate limit suspected
-RATE_LIMIT_COOLDOWN = 10
-
-# ---------------------------------------------------
-# Dataset parameters
-# ---------------------------------------------------
-
-# Parquet compression algorithm
-PARQUET_COMPRESSION = "snappy"
-
-# Engine used by pandas
-PARQUET_ENGINE = "pyarrow"
-
-# Column used as time index
-TIME_COLUMN = "time"
-
-# Price columns expected from vnstock
-PRICE_COLUMNS = [
-    "time",
-    "open",
-    "high",
-    "low",
-    "close",
-    "volume"
-]
-
-# ---------------------------------------------------
-# Market update logic
-# ---------------------------------------------------
-
-# If last stored date >= today, skip update
-TODAY = date.today()
-
-# Maximum lookback window for safety updates
-# (sometimes exchanges adjust historical data)
-SAFE_UPDATE_LOOKBACK_DAYS = 5
-
-# ---------------------------------------------------
-# Logging
-# ---------------------------------------------------
 
 LOG_DIR = BASE_DIR / "logs"
 
-LOG_FILE = LOG_DIR / "pipeline.log"
 
-# ---------------------------------------------------
-# Create required directories automatically
-# ---------------------------------------------------
+# --------------------------------------------------
+# Dataset structure
+# --------------------------------------------------
+# data/
+# └── market/
+#     ├── symbol=AAA/data.parquet
+#     ├── symbol=HPG/data.parquet
+#     └── symbol=FPT/data.parquet
 
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-MARKET_DATA_DIR.mkdir(parents=True, exist_ok=True)
-RAW_DATA_DIR.mkdir(parents=True, exist_ok=True)
-LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+# --------------------------------------------------
+# VNStock configuration
+# --------------------------------------------------
+
+DATA_SOURCE = os.getenv("VNSTOCK_SOURCE", "VCI")
+
+# Optional API key (if using paid endpoints)
+VNSTOCK_API_KEY = os.getenv("VNSTOCK_API_KEY", "")
+
+
+# --------------------------------------------------
+# Fetch settings
+# --------------------------------------------------
+
+DEFAULT_HISTORY_START = "2015-01-01"
+
+FETCH_SLEEP_SECONDS = float(os.getenv("FETCH_SLEEP_SECONDS", 1.8))
+
+RATE_LIMIT_COOLDOWN = int(os.getenv("RATE_LIMIT_COOLDOWN", 12))
+
+
+# --------------------------------------------------
+# Parquet settings
+# --------------------------------------------------
+
+PARQUET_ENGINE = "pyarrow"
+
+PARQUET_COMPRESSION = "snappy"
+
+TIME_COLUMN = "time"
+
+
+# --------------------------------------------------
+# Safety update logic
+# --------------------------------------------------
+
+TODAY = date.today()
+
+SAFE_UPDATE_LOOKBACK_DAYS = 5
+
+
+# --------------------------------------------------
+# Create directories automatically
+# --------------------------------------------------
+
+DATA_DIR.mkdir(exist_ok=True)
+RAW_DATA_DIR.mkdir(exist_ok=True)
+MARKET_DATA_DIR.mkdir(exist_ok=True)
+LOG_DIR.mkdir(exist_ok=True)

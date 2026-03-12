@@ -38,3 +38,6 @@ data/last_symbol.txt
 
 # Optional logs
 logs/
+
+# Environment secrets
+.env
