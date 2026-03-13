@@ -56,8 +56,8 @@ def fetch_ratios(symbol):
 
     try:
         finance_vci = Finance(
-            source="VCI",            # Nguồn dữ liệu
-            symbol="VCI",            # Mã chứng khoán
+            source=DATA_SOURCE,            # Nguồn dữ liệu
+            symbol=symbol,            # Mã chứng khoán
             period="quarter",        # Chu kỳ mặc định
             get_all=True,            # Lấy tất cả các trường
         )
