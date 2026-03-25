@@ -52,7 +52,8 @@ LOG_DIR = BASE_DIR / "logs"
 
 SYMBOL_FILE = DATA_DIR / "symbols.csv"
 
-MARKET_CHECKPOINT_FILE = DATA_DIR / "last_symbol.txt"
+STATE_FILE = MARKET_DATA_DIR.parent / "fetch_state.json"
+
 RATIO_CHECKPOINT_FILE = DATA_DIR / "ratio_last_symbol.txt"
 
 

@@ -1,117 +1,131 @@
-from vnstock import Vnstock
 import pandas as pd
+import json
 from pathlib import Path
-from datetime import datetime, timedelta, date
-import time
-from vnstock import register_user
-from config.settings import (MARKET_DATA_DIR, SYMBOL_FILE, MARKET_CHECKPOINT_FILE, DATA_SOURCE, FETCH_SLEEP_SECONDS,
-                             RATE_LIMIT_COOLDOWN, DEFAULT_HISTORY_START, TIME_COLUMN, VNSTOCK_API_KEY)
+from datetime import datetime
+
+from vnstock import Vnstock, register_user
+
+from config.settings import (
+    MARKET_DATA_DIR,
+    SYMBOL_FILE,
+    STATE_FILE,
+    DATA_SOURCE,
+    PARQUET_ENGINE,
+    PARQUET_COMPRESSION,
+    VNSTOCK_API_KEY,
+    DEFAULT_HISTORY_START,
+)
+# ----------------------------------------
+# State management
+# ----------------------------------------
+
+def load_state():
+
+    if not STATE_FILE.exists():
+        return {}
+
+    with open(STATE_FILE, "r") as f:
+        return json.load(f)
 
 
-# --------------------------------------------------
-# Configuration
-# --------------------------------------------------
-MARKET_DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-
-# --------------------------------------------------
+# ----------------------------------------
 # Symbol utilities
-# --------------------------------------------------
+# ----------------------------------------
 
 def load_symbols():
+
     df = pd.read_csv(SYMBOL_FILE)
+
     return df["symbol"].tolist()
 
 
-def load_checkpoint():
-
-    if not MARKET_CHECKPOINT_FILE.exists():
-        return None
-
-    return MARKET_CHECKPOINT_FILE.read_text().strip()
-
-
-def save_checkpoint(symbol):
-    MARKET_CHECKPOINT_FILE.write_text(symbol)
-
-
-# --------------------------------------------------
-# Dataset utilities
-# --------------------------------------------------
-
 def symbol_file(symbol):
+
     return MARKET_DATA_DIR / f"symbol={symbol}" / "data.parquet"
 
 
-def get_last_date(symbol):
+# ----------------------------------------
+# Fetch logic
+# ----------------------------------------
 
-    file = symbol_file(symbol)
-
-    if not file.exists():
-        return None
-
-    try:
-
-        df = pd.read_parquet(file, columns=[TIME_COLUMN])
-
-        if df.empty:
-            return None
-
-        last_date = pd.to_datetime(df[TIME_COLUMN]).max()
-
-        return last_date.date()
-
-    except Exception:
-        return None
-
-
-# --------------------------------------------------
-# Fetch data
-# --------------------------------------------------
-
-def fetch_symbol(symbol, start_date):
+def fetch_price(symbol, start_date):
 
     stock = Vnstock().stock(symbol=symbol, source=DATA_SOURCE)
-    
-    if isinstance(start_date, (datetime, date)):
-        start_date = start_date.strftime("%Y-%m-%d")
 
     df = stock.quote.history(start=start_date)
+
+    if df is None or df.empty:
+        return None
 
     return df
 
 
-# --------------------------------------------------
-# Update dataset
-# --------------------------------------------------
+# ----------------------------------------
+# Update symbol
+# ----------------------------------------
 
-def update_symbol(symbol):
+def update_symbol(symbol, state):
 
     file = symbol_file(symbol)
 
-    last_date = get_last_date(symbol)
+    symbol_state = state.get(symbol, {})
+
+    if symbol_state.get("status") == "delisted":
+        print(f"{symbol} is delisted → skip")
+        return
+
+    last_date = symbol_state.get("last_date")
+
+    today = datetime.today().date()
+
+    # ----------------------------------------
+    # Skip if already up-to-date
+    # ----------------------------------------
 
     if last_date:
 
-        start_date = last_date + timedelta(days=1)
+        last_date_dt = datetime.strptime(last_date, "%Y-%m-%d").date()
 
-        if start_date >= datetime.today().date():
-            print(f"{symbol} already up-to-date")
+        if last_date_dt >= today:
+            print(f"{symbol} already up-to-date ({last_date}) → skip")
             return
-        
+
+        start_date = last_date
 
     else:
         start_date = DEFAULT_HISTORY_START
 
     print(f"Fetching {symbol} from {start_date}")
 
-    df_new = fetch_symbol(symbol, start_date)
+    try:
+
+        df_new = fetch_price(symbol, start_date)
+
+    except Exception as e:
+
+        print(f"{symbol} network/error: {e}")
+        return  # skip without marking delisted
+
+    # ----------------------------------------
+    # No data returned → mark delisted
+    # ----------------------------------------
 
     if df_new is None or df_new.empty:
-        print("No new data")
+
+        print(f"{symbol} no new data → mark delisted")
+
+        state[symbol] = {
+            "last_date": last_date,
+            "status": "delisted"
+        }
+
         return
 
     df_new["symbol"] = symbol
+
+    # ----------------------------------------
+    # Load existing data
+    # ----------------------------------------
 
     if file.exists():
 
@@ -119,60 +133,45 @@ def update_symbol(symbol):
 
         df = pd.concat([df_old, df_new], ignore_index=True)
 
-        df = df.drop_duplicates(subset=[TIME_COLUMN])
+        df = df.drop_duplicates(subset=["time"])
 
     else:
 
         df = df_new
 
-    df = df.sort_values(TIME_COLUMN)
+    df = df.sort_values("time")
+
+    # ----------------------------------------
+    # Save parquet
+    # ----------------------------------------
 
     file.parent.mkdir(parents=True, exist_ok=True)
 
     df.to_parquet(
         file,
-        engine="pyarrow",
-        compression="snappy",
+        engine=PARQUET_ENGINE,
+        compression=PARQUET_COMPRESSION,
         index=False
     )
 
+    print(f"{symbol} updated")
 
-# --------------------------------------------------
-# Main loop
-# --------------------------------------------------
+
+# ----------------------------------------
+# Main
+# ----------------------------------------
 
 def main():
+
     register_user(api_key=VNSTOCK_API_KEY)
+
     symbols = load_symbols()
 
-    last_symbol = load_checkpoint()
+    state = load_state()
 
-    start_index = 0
+    for symbol in symbols:
 
-    if last_symbol and last_symbol in symbols:
-        start_index = symbols.index(last_symbol) + 1
-
-    ordered_symbols = symbols[start_index:] + symbols[:start_index]
-
-    print(f"Starting from symbol index {start_index}")
-
-    for symbol in ordered_symbols:
-
-        try:
-
-            update_symbol(symbol)
-
-            save_checkpoint(symbol)
-
-            time.sleep(FETCH_SLEEP_SECONDS)
-
-        except Exception as e:
-
-            print(f"Error with {symbol}: {e}")
-
-            print("Cooling down due to possible rate limit...")
-
-            time.sleep(RATE_LIMIT_COOLDOWN)
+        update_symbol(symbol, state)
 
 
 if __name__ == "__main__":
