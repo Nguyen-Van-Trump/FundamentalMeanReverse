@@ -38,7 +38,7 @@ if ENV_FILE.exists():
 DATA_DIR = BASE_DIR / "data"
 
 RAW_DATA_DIR = DATA_DIR / "raw"
-PROCESSED_DATA_DIR = DATA_DIR / "processed"
+PROCESSED_DATA_DIR = DATA_DIR / "feature"
 
 MARKET_DATA_DIR = DATA_DIR / "market"
 RATIO_DATA_DIR = DATA_DIR / "ratio"
@@ -76,9 +76,9 @@ if VNSTOCK_API_KEY is None:
 
 DEFAULT_HISTORY_START = "2015-01-01"
 
-FETCH_SLEEP_SECONDS = float(os.getenv("FETCH_SLEEP_SECONDS", 0.35))
+FETCH_SLEEP_SECONDS = float(os.getenv("FETCH_SLEEP_SECONDS", 1.2))
 
-RATE_LIMIT_COOLDOWN = int(os.getenv("RATE_LIMIT_COOLDOWN", 10))
+RATE_LIMIT_COOLDOWN = int(os.getenv("RATE_LIMIT_COOLDOWN", 12))
 
 
 # --------------------------------------------------

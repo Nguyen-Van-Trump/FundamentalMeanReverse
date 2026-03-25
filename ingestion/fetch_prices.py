@@ -1,5 +1,6 @@
 import pandas as pd
 import json
+import time
 from pathlib import Path
 from datetime import datetime
 
@@ -14,7 +15,10 @@ from config.settings import (
     PARQUET_COMPRESSION,
     VNSTOCK_API_KEY,
     DEFAULT_HISTORY_START,
+    FETCH_SLEEP_SECONDS,
+    RATE_LIMIT_COOLDOWN,
 )
+
 # ----------------------------------------
 # State management
 # ----------------------------------------
@@ -26,6 +30,12 @@ def load_state():
 
     with open(STATE_FILE, "r") as f:
         return json.load(f)
+
+
+def save_state(state):
+
+    with open(STATE_FILE, "w") as f:
+        json.dump(state, f, indent=2)
 
 
 # ----------------------------------------
@@ -61,100 +71,138 @@ def fetch_price(symbol, start_date):
 
 
 # ----------------------------------------
-# Update symbol
+# Update symbol (with retry)
 # ----------------------------------------
 
 def update_symbol(symbol, state):
 
-    file = symbol_file(symbol)
+    for attempt in range(2):  # max 2 attempts
 
-    symbol_state = state.get(symbol, {})
+        try:
 
-    if symbol_state.get("status") == "delisted":
-        print(f"{symbol} is delisted → skip")
-        return
+            file = symbol_file(symbol)
 
-    last_date = symbol_state.get("last_date")
+            symbol_state = state.get(symbol, {})
 
-    today = datetime.today().date()
+            # ----------------------------------------
+            # Skip delisted
+            # ----------------------------------------
 
-    # ----------------------------------------
-    # Skip if already up-to-date
-    # ----------------------------------------
+            if symbol_state.get("status") == "delisted":
+                print(f"{symbol} is delisted → skip")
+                return False
 
-    if last_date:
+            last_date = symbol_state.get("last_date")
 
-        last_date_dt = datetime.strptime(last_date, "%Y-%m-%d").date()
+            today = datetime.today().date()
 
-        if last_date_dt >= today:
-            print(f"{symbol} already up-to-date ({last_date}) → skip")
-            return
+            # ----------------------------------------
+            # Skip if up-to-date
+            # ----------------------------------------
 
-        start_date = last_date
+            if last_date:
 
-    else:
-        start_date = DEFAULT_HISTORY_START
+                last_dt = datetime.strptime(last_date, "%Y-%m-%d").date()
 
-    print(f"Fetching {symbol} from {start_date}")
+                if last_dt >= today:
+                    print(f"{symbol} already up-to-date ({last_date}) → skip")
+                    return False
 
-    try:
+                start_date = last_date
 
-        df_new = fetch_price(symbol, start_date)
+            else:
+                start_date = DEFAULT_HISTORY_START
 
-    except Exception as e:
+            print(f"Fetching {symbol} from {start_date} (attempt {attempt+1})")
 
-        print(f"{symbol} network/error: {e}")
-        return  # skip without marking delisted
+            # ----------------------------------------
+            # Fetch
+            # ----------------------------------------
 
-    # ----------------------------------------
-    # No data returned → mark delisted
-    # ----------------------------------------
+            df_new = fetch_price(symbol, start_date)
 
-    if df_new is None or df_new.empty:
+            # ----------------------------------------
+            # No data → delisted
+            # ----------------------------------------
 
-        print(f"{symbol} no new data → mark delisted")
+            if df_new is None or df_new.empty:
 
-        state[symbol] = {
-            "last_date": last_date,
-            "status": "delisted"
-        }
+                print(f"{symbol} no new data → mark delisted")
 
-        return
+                state[symbol] = {
+                    "last_date": last_date,
+                    "status": "delisted"
+                }
 
-    df_new["symbol"] = symbol
+                save_state(state)
 
-    # ----------------------------------------
-    # Load existing data
-    # ----------------------------------------
+                return False
 
-    if file.exists():
+            df_new["symbol"] = symbol
 
-        df_old = pd.read_parquet(file)
+            # ----------------------------------------
+            # Merge with existing
+            # ----------------------------------------
 
-        df = pd.concat([df_old, df_new], ignore_index=True)
+            if file.exists():
 
-        df = df.drop_duplicates(subset=["time"])
+                df_old = pd.read_parquet(file)
 
-    else:
+                df = pd.concat([df_old, df_new], ignore_index=True)
 
-        df = df_new
+                df = df.drop_duplicates(subset=["time"])
 
-    df = df.sort_values("time")
+            else:
 
-    # ----------------------------------------
-    # Save parquet
-    # ----------------------------------------
+                df = df_new
 
-    file.parent.mkdir(parents=True, exist_ok=True)
+            df = df.sort_values("time")
 
-    df.to_parquet(
-        file,
-        engine=PARQUET_ENGINE,
-        compression=PARQUET_COMPRESSION,
-        index=False
-    )
+            # ----------------------------------------
+            # Save parquet
+            # ----------------------------------------
 
-    print(f"{symbol} updated")
+            file.parent.mkdir(parents=True, exist_ok=True)
+
+            df.to_parquet(
+                file,
+                engine=PARQUET_ENGINE,
+                compression=PARQUET_COMPRESSION,
+                index=False
+            )
+
+            # ----------------------------------------
+            # Update state
+            # ----------------------------------------
+
+            latest_date = str(pd.to_datetime(df["time"]).max().date())
+
+            state[symbol] = {
+                "last_date": latest_date,
+                "status": "active"
+            }
+
+            save_state(state)
+
+            print(f"{symbol} updated → {latest_date}")
+
+            return True  # success
+
+        except Exception as e:
+
+            print(f"{symbol} error: {e}")
+
+            # ----------------------------------------
+            # Cooldown before retry
+            # ----------------------------------------
+
+            if attempt == 0:
+                print(f"{symbol} cooldown before retry...")
+                time.sleep(RATE_LIMIT_COOLDOWN)
+            else:
+                print(f"{symbol} failed after retry → skip")
+
+    return False
 
 
 # ----------------------------------------
@@ -171,7 +219,14 @@ def main():
 
     for symbol in symbols:
 
-        update_symbol(symbol, state)
+        updated = update_symbol(symbol, state)
+
+        # ----------------------------------------
+        # Sleep ONLY if successful fetch
+        # ----------------------------------------
+
+        if updated:
+            time.sleep(FETCH_SLEEP_SECONDS)
 
 
 if __name__ == "__main__":
