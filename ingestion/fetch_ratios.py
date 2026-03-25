@@ -1,12 +1,11 @@
-from vnstock import Finance, register_user
+from vnstock import Vnstock, register_user
 import pandas as pd
+import json
 import time
-from pathlib import Path
 
 from config.settings import (
     RATIO_DATA_DIR,
-    RATIO_CHECKPOINT_FILE,
-    SYMBOL_FILE,
+    STATE_FILE,
     FETCH_SLEEP_SECONDS,
     RATE_LIMIT_COOLDOWN,
     DATA_SOURCE,
@@ -15,86 +14,71 @@ from config.settings import (
     VNSTOCK_API_KEY
 )
 
-# --------------------------------------------------
-# Symbol utilities
-# --------------------------------------------------
+# ----------------------------------------
+# Load state
+# ----------------------------------------
 
-def load_symbols():
+def load_state():
 
-    df = pd.read_csv(SYMBOL_FILE)
+    if not STATE_FILE.exists():
+        raise FileNotFoundError("fetch_state.json not found")
 
-    return df["symbol"].tolist()
-
-
-def load_checkpoint():
-
-    if not RATIO_CHECKPOINT_FILE.exists():
-        return None
-
-    return RATIO_CHECKPOINT_FILE.read_text().strip()
+    with open(STATE_FILE, "r") as f:
+        return json.load(f)
 
 
-def save_checkpoint(symbol):
-
-    RATIO_CHECKPOINT_FILE.write_text(symbol)
-
-
-# --------------------------------------------------
-# Dataset utilities
-# --------------------------------------------------
+# ----------------------------------------
+# Dataset path
+# ----------------------------------------
 
 def symbol_file(symbol):
 
     return RATIO_DATA_DIR / f"symbol={symbol}" / "data.parquet"
 
 
-# --------------------------------------------------
+# ----------------------------------------
 # Fetch ratios
-# --------------------------------------------------
+# ----------------------------------------
 
 def fetch_ratios(symbol):
 
-    try:
-        finance_vci = Finance(
-            source=DATA_SOURCE,            # Nguồn dữ liệu
-            symbol=symbol,            # Mã chứng khoán
-            period="quarter",        # Chu kỳ mặc định
-            get_all=True,            # Lấy tất cả các trường
-        )
+    stock = Vnstock().stock(symbol=symbol, source=DATA_SOURCE)
 
-        df = finance_vci.ratio()
+    df = stock.finance.ratio()
 
-        if df is None or df.empty:
-            return None
-
-        return df
-
-    except Exception:
-
+    if df is None or df.empty:
         return None
-
-
-# --------------------------------------------------
-# Clean dataframe
-# --------------------------------------------------
-
-def clean_ratio_dataframe(df):
-
-    # flatten weird vnstock column names
-    df.columns = [
-        c.split(",")[-1].replace("')", "").replace("'", "").strip()
-        for c in df.columns
-    ]
-    # drop ('symbol','') column which becomes empty after flattening
-    if "" in df.columns:
-        df = df.drop(columns=[""])
 
     return df
 
 
-# --------------------------------------------------
-# Update dataset
-# --------------------------------------------------
+# ----------------------------------------
+# Clean dataframe
+# ----------------------------------------
+
+def clean_ratio_dataframe(df, symbol):
+
+    # drop first row (artifact)
+    if len(df) > 1:
+        df = df.iloc[1:].reset_index(drop=True)
+
+    # flatten column names
+    df.columns = [
+        c.split(",")[-1].replace("')", "").replace("'", "").strip()
+        for c in df.columns
+    ]
+
+    # drop empty column (from ('symbol',''))
+    df = df.loc[:, df.columns != ""]
+
+    df["symbol"] = symbol
+
+    return df
+
+
+# ----------------------------------------
+# Update symbol
+# ----------------------------------------
 
 def update_symbol(symbol):
 
@@ -105,10 +89,10 @@ def update_symbol(symbol):
     df = fetch_ratios(symbol)
 
     if df is None:
-        print("No ratio data")
-        return
+        print(f"{symbol}: no ratio data")
+        return False
 
-    df = clean_ratio_dataframe(df)
+    df = clean_ratio_dataframe(df, symbol)
 
     if file.exists():
 
@@ -127,62 +111,46 @@ def update_symbol(symbol):
         index=False
     )
 
+    print(f"{symbol}: ratios updated")
 
-# --------------------------------------------------
-# Build symbol order
-# --------------------------------------------------
-
-def build_symbol_queue(symbols, last_symbol, loop_mode=True):
-
-    start_index = 0
-
-    if last_symbol and last_symbol in symbols:
-        start_index = symbols.index(last_symbol) + 1
-
-    if loop_mode:
-        queue = symbols[start_index:] + symbols[:start_index]
-    else:
-        queue = symbols[start_index:]
-
-    return queue, start_index
+    return True
 
 
-# --------------------------------------------------
-# Main loop
-# --------------------------------------------------
+# ----------------------------------------
+# Main
+# ----------------------------------------
 
-def main(loop_mode=True):
+def main():
 
     register_user(api_key=VNSTOCK_API_KEY)
 
-    symbols = load_symbols()
+    state = load_state()
 
-    last_symbol = load_checkpoint()
+    for symbol, info in state.items():
 
-    symbol_queue, start_index = build_symbol_queue(
-        symbols,
-        last_symbol,
-        loop_mode
-    )
+        # ----------------------------------------
+        # Skip delisted immediately (no wait)
+        # ----------------------------------------
 
-    print(f"Starting ratio fetch from symbol index {start_index}")
-    print(f"Loop mode: {loop_mode}")
-
-    for symbol in symbol_queue:
+        if info.get("status") != "active":
+            print(f"{symbol} is delisted → skip")
+            continue
 
         try:
 
-            update_symbol(symbol)
+            updated = update_symbol(symbol)
 
-            save_checkpoint(symbol)
+            # ----------------------------------------
+            # Only sleep if actual fetch happened
+            # ----------------------------------------
 
-            time.sleep(FETCH_SLEEP_SECONDS)
+            if updated:
+                time.sleep(FETCH_SLEEP_SECONDS)
 
         except Exception as e:
 
-            print(f"Error with {symbol}: {e}")
-
-            print("Cooling down due to possible rate limit...")
+            print(f"{symbol} error: {e}")
+            print("Cooling down (rate limit or network)...")
 
             time.sleep(RATE_LIMIT_COOLDOWN)
 
