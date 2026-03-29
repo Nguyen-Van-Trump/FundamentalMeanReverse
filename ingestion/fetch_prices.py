@@ -5,6 +5,7 @@ from pathlib import Path
 from datetime import datetime
 
 from vnstock import Vnstock, register_user
+from requests.exceptions import RetryError  # added: needed to catch RetryError from HTTP layer
 
 from config.settings import (
     MARKET_DATA_DIR,
@@ -176,24 +177,19 @@ def update_symbol(symbol, state):
 
             latest_date = str(pd.to_datetime(df["time"]).max().date())
 
-            # ----------------------------------------
-            # If fetched data is not newer than what was
-            # already saved, the symbol is likely delisted
-            # or halted — unless the latest date is today,
-            # which means the data is genuinely current.
-            # ----------------------------------------
-
+            # added: if the latest fetched date is not newer than what we already
+            # have saved, AND it is not today's date, the symbol has gone stale →
+            # treat it as delisted so we stop polling it unnecessarily.
             if last_date and latest_date <= last_date and latest_date != str(TODAY):
-
-                print(f"{symbol} latest fetched date ({latest_date}) is not newer than last saved ({last_date}) → mark delisted")
-
+                print(
+                    f"{symbol} latest fetched date ({latest_date}) is not newer "
+                    f"than saved date ({last_date}) and is not today → mark delisted"
+                )
                 state[symbol] = {
                     "last_date": last_date,
                     "status": "delisted"
                 }
-
                 save_state(state)
-
                 return False
 
             state[symbol] = {
@@ -211,24 +207,11 @@ def update_symbol(symbol, state):
 
             print(f"{symbol} error: {e}")
 
-            # ----------------------------------------
-            # NoneType (TypeError) or ValueError errors
-            # indicate the API returned unusable data —
-            # mark as delisted immediately, no retry needed.
-            # ----------------------------------------
-
-            if isinstance(e, (TypeError, ValueError)):
-
-                print(f"{symbol} NoneType/ValueError → mark delisted")
-
-                state[symbol] = {
-                    "last_date": symbol_state.get("last_date"),
-                    "status": "delisted"
-                }
-
-                save_state(state)
-
-                return False
+            # added: NoneType errors surface as TypeError (e.g. calling a method on
+            # None), so we group TypeError with ValueError and RetryError as signals
+            # that the symbol's data is fundamentally broken rather than a transient
+            # network glitch.  After the second attempt we give up and mark delisted.
+            is_fatal_error = isinstance(e, (TypeError, ValueError, RetryError))
 
             # ----------------------------------------
             # Cooldown before retry
@@ -239,6 +222,20 @@ def update_symbol(symbol, state):
                 time.sleep(RATE_LIMIT_COOLDOWN)
             else:
                 print(f"{symbol} failed after retry → skip")
+
+                # added: persist delisted status so the symbol is not retried on
+                # future runs when the error indicates bad/missing data, not just a
+                # transient outage.
+                if is_fatal_error:
+                    print(
+                        f"{symbol} fatal error ({type(e).__name__}) after retry "
+                        f"→ mark delisted"
+                    )
+                    state[symbol] = {
+                        "last_date": state.get(symbol, {}).get("last_date"),
+                        "status": "delisted"
+                    }
+                    save_state(state)
 
     return False
 
