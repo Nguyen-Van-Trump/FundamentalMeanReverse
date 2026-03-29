@@ -17,6 +17,7 @@ from config.settings import (
     DEFAULT_HISTORY_START,
     FETCH_SLEEP_SECONDS,
     RATE_LIMIT_COOLDOWN,
+    TODAY
 )
 
 # ----------------------------------------
@@ -94,8 +95,6 @@ def update_symbol(symbol, state):
 
             last_date = symbol_state.get("last_date")
 
-            today = datetime.today().date()
-
             # ----------------------------------------
             # Skip if up-to-date
             # ----------------------------------------
@@ -104,7 +103,7 @@ def update_symbol(symbol, state):
 
                 last_dt = datetime.strptime(last_date, "%Y-%m-%d").date()
 
-                if last_dt >= today:
+                if last_dt >= TODAY:
                     print(f"{symbol} already up-to-date ({last_date}) → skip")
                     return False
 
@@ -178,14 +177,15 @@ def update_symbol(symbol, state):
             latest_date = str(pd.to_datetime(df["time"]).max().date())
 
             # ----------------------------------------
-            # Latest date not newer than saved → delisted
-            # Happens when the API returns stale/duplicate
-            # data with no actual new trading activity.
+            # If fetched data is not newer than what was
+            # already saved, the symbol is likely delisted
+            # or halted — unless the latest date is today,
+            # which means the data is genuinely current.
             # ----------------------------------------
 
-            if last_date and latest_date <= last_date:
+            if last_date and latest_date <= last_date and latest_date != str(TODAY):
 
-                print(f"{symbol} latest date ({latest_date}) not newer than saved ({last_date}) → mark delisted")
+                print(f"{symbol} latest fetched date ({latest_date}) is not newer than last saved ({last_date}) → mark delisted")
 
                 state[symbol] = {
                     "last_date": last_date,
@@ -207,28 +207,28 @@ def update_symbol(symbol, state):
 
             return True  # success
 
-        # ----------------------------------------
-        # NoneType / bad value errors → delisted
-        # These indicate structurally bad API data,
-        # not a transient issue, so skip the retry.
-        # ----------------------------------------
-
-        except (TypeError, ValueError) as e:
-
-            print(f"{symbol} data error ({type(e).__name__}): {e} → mark delisted")
-
-            state[symbol] = {
-                "last_date": state.get(symbol, {}).get("last_date"),
-                "status": "delisted"
-            }
-
-            save_state(state)
-
-            return False
-
         except Exception as e:
 
             print(f"{symbol} error: {e}")
+
+            # ----------------------------------------
+            # NoneType (TypeError) or ValueError errors
+            # indicate the API returned unusable data —
+            # mark as delisted immediately, no retry needed.
+            # ----------------------------------------
+
+            if isinstance(e, (TypeError, ValueError)):
+
+                print(f"{symbol} NoneType/ValueError → mark delisted")
+
+                state[symbol] = {
+                    "last_date": symbol_state.get("last_date"),
+                    "status": "delisted"
+                }
+
+                save_state(state)
+
+                return False
 
             # ----------------------------------------
             # Cooldown before retry
