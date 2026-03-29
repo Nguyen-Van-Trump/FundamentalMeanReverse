@@ -38,7 +38,7 @@ if ENV_FILE.exists():
 DATA_DIR = BASE_DIR / "data"
 
 RAW_DATA_DIR = DATA_DIR / "raw"
-PROCESSED_DATA_DIR = DATA_DIR / "feature"
+FEATURE_DATA_DIR = DATA_DIR / "feature"
 
 MARKET_DATA_DIR = DATA_DIR / "market"
 RATIO_DATA_DIR = DATA_DIR / "ratio"
@@ -124,7 +124,7 @@ LOG_FILE = LOG_DIR / "pipeline.log"
 DIRECTORIES = [
     DATA_DIR,
     RAW_DATA_DIR,
-    PROCESSED_DATA_DIR,
+    FEATURE_DATA_DIR,
     MARKET_DATA_DIR,
     RATIO_DATA_DIR,
     LOG_DIR,
