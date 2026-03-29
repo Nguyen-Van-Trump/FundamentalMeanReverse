@@ -177,6 +177,25 @@ def update_symbol(symbol, state):
 
             latest_date = str(pd.to_datetime(df["time"]).max().date())
 
+            # ----------------------------------------
+            # Latest date not newer than saved → delisted
+            # Happens when the API returns stale/duplicate
+            # data with no actual new trading activity.
+            # ----------------------------------------
+
+            if last_date and latest_date <= last_date:
+
+                print(f"{symbol} latest date ({latest_date}) not newer than saved ({last_date}) → mark delisted")
+
+                state[symbol] = {
+                    "last_date": last_date,
+                    "status": "delisted"
+                }
+
+                save_state(state)
+
+                return False
+
             state[symbol] = {
                 "last_date": latest_date,
                 "status": "active"
@@ -187,6 +206,25 @@ def update_symbol(symbol, state):
             print(f"{symbol} updated → {latest_date}")
 
             return True  # success
+
+        # ----------------------------------------
+        # NoneType / bad value errors → delisted
+        # These indicate structurally bad API data,
+        # not a transient issue, so skip the retry.
+        # ----------------------------------------
+
+        except (TypeError, ValueError) as e:
+
+            print(f"{symbol} data error ({type(e).__name__}): {e} → mark delisted")
+
+            state[symbol] = {
+                "last_date": state.get(symbol, {}).get("last_date"),
+                "status": "delisted"
+            }
+
+            save_state(state)
+
+            return False
 
         except Exception as e:
 
