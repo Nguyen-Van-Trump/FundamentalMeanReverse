@@ -41,7 +41,10 @@ RAW_DATA_DIR = DATA_DIR / "raw"
 FEATURE_DATA_DIR = DATA_DIR / "feature"
 
 MARKET_DATA_DIR = DATA_DIR / "market"
+MARKET_ENRICHED_DIR = DATA_DIR / "market_enriched"
+
 RATIO_DATA_DIR = DATA_DIR / "ratio"
+RATIO_NORMALIZED_DIR = DATA_DIR / "ratio_normalized"
 
 LOG_DIR = BASE_DIR / "logs"
 
