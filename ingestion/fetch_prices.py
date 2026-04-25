@@ -209,8 +209,8 @@ def update_symbol(symbol, state):
 
             # added: NoneType errors surface as TypeError (e.g. calling a method on
             # None), so we group TypeError with ValueError and RetryError as signals
-            # that the symbol's data is fundamentally broken rather than a transient
-            # network glitch.  After the second attempt we give up and mark delisted.
+            # that the symbol's data is structurally broken rather than a transient
+            # network glitch. After the second attempt we give up and mark delisted.
             is_fatal_error = isinstance(e, (TypeError, ValueError, RetryError))
 
             # ----------------------------------------
