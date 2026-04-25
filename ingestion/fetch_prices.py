@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from datetime import datetime
 
-from vnstock import Vnstock, register_user
+from vnstock import Quote, register_user
 from requests.exceptions import RetryError  # added: needed to catch RetryError from HTTP layer
 
 from config.settings import (
@@ -62,9 +62,9 @@ def symbol_file(symbol):
 
 def fetch_price(symbol, start_date):
 
-    stock = Vnstock().stock(symbol=symbol, source=DATA_SOURCE)
+    quote = Quote(symbol=symbol, source=DATA_SOURCE)
 
-    df = stock.quote.history(start=start_date)
+    df = quote.history(start=start_date)
 
     if df is None or df.empty:
         return None
