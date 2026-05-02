@@ -14,6 +14,8 @@ from datetime import date
 import os
 from dotenv import load_dotenv
 
+from config.logging_config import get_logger
+
 
 # --------------------------------------------------
 # Project root
@@ -43,6 +45,7 @@ MARKET_DATA_DIR = DATA_DIR / "market"
 MARKET_ENRICHED_DIR = DATA_DIR / "market_enriched"
 
 LOG_DIR = BASE_DIR / "logs"
+logger = get_logger(__name__)
 
 
 # --------------------------------------------------
@@ -63,7 +66,7 @@ VNSTOCK_API_KEY = os.getenv("VNSTOCK_API_KEY")
 
 # Validate API key (optional)
 if VNSTOCK_API_KEY is None:
-    print("Warning: VNSTOCK_API_KEY not set (some features may not work)")
+    logger.warning("vnstock_api_key_not_set")
 
 
 # --------------------------------------------------

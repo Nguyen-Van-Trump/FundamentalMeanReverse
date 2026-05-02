@@ -7,6 +7,7 @@ from datetime import datetime
 from vnstock import Quote, register_user
 from requests.exceptions import RetryError  # added: needed to catch RetryError from HTTP layer
 
+from config.logging_config import get_logger
 from config.settings import (
     MARKET_DATA_DIR,
     SYMBOL_FILE,
@@ -20,6 +21,8 @@ from config.settings import (
     RATE_LIMIT_COOLDOWN,
     TODAY
 )
+
+logger = get_logger(__name__)
 
 # ----------------------------------------
 # State management
@@ -62,14 +65,34 @@ def symbol_file(symbol):
 
 def fetch_price(symbol, start_date):
 
+    logger.info("data_fetch_start symbol=%s start_date=%s source=%s", symbol, start_date, DATA_SOURCE)
     quote = Quote(symbol=symbol, source=DATA_SOURCE)
 
     df = quote.history(start=start_date)
 
     if df is None or df.empty:
+        logger.info("data_fetch_empty symbol=%s start_date=%s", symbol, start_date)
         return None
 
+    logger.info("data_fetch_success symbol=%s start_date=%s rows=%s", symbol, start_date, len(df))
     return df
+
+
+def mark_delisted(symbol, state, last_date, reason):
+    previous_status = state.get(symbol, {}).get("status")
+    state[symbol] = {
+        "last_date": last_date,
+        "status": "delisted"
+    }
+    save_state(state)
+
+    if previous_status != "delisted":
+        logger.warning(
+            "new_delisted_symbol symbol=%s last_date=%s reason=%s",
+            symbol,
+            last_date,
+            reason,
+        )
 
 
 # ----------------------------------------
@@ -91,7 +114,7 @@ def update_symbol(symbol, state):
             # ----------------------------------------
 
             if symbol_state.get("status") == "delisted":
-                print(f"{symbol} is delisted → skip")
+                logger.info("data_fetch_skip_delisted symbol=%s", symbol)
                 return False
 
             last_date = symbol_state.get("last_date")
@@ -105,15 +128,16 @@ def update_symbol(symbol, state):
                 last_dt = datetime.strptime(last_date, "%Y-%m-%d").date()
 
                 if last_dt >= TODAY:
-                    print(f"{symbol} already up-to-date ({last_date}) → skip")
+                    logger.info("data_fetch_skip_current symbol=%s last_date=%s", symbol, last_date)
                     return False
 
                 start_date = last_date
 
             else:
                 start_date = DEFAULT_HISTORY_START
+                last_dt = datetime.strptime(DEFAULT_HISTORY_START, "%Y-%m-%d").date()
 
-            print(f"Fetching {symbol} from {start_date} (attempt {attempt+1})")
+            logger.info("data_fetch_attempt symbol=%s start_date=%s attempt=%s", symbol, start_date, attempt + 1)
 
             # ----------------------------------------
             # Fetch
@@ -127,14 +151,7 @@ def update_symbol(symbol, state):
 
             if df_new is None or df_new.empty and (TODAY - last_dt).days > 30:  # added: only mark delisted if the last date is more than 30 days old to avoid false positives from temporary outages
 
-                print(f"{symbol} no new data → mark delisted")
-
-                state[symbol] = {
-                    "last_date": last_date,
-                    "status": "delisted"
-                }
-
-                save_state(state)
+                mark_delisted(symbol, state, last_date, "no_data")
 
                 return False
 
@@ -181,15 +198,13 @@ def update_symbol(symbol, state):
             # have saved, AND it is not within 7 days of today's date, the symbol has gone stale →
             # treat it as delisted so we stop polling it unnecessarily.
             if last_date and latest_date <= last_date and (TODAY - pd.to_datetime(latest_date).date()).days > 7:
-                print(
-                    f"{symbol} latest fetched date ({latest_date}) is not newer "
-                    f"than saved date ({last_date}) and is not within 7 days of today → mark delisted"
+                logger.warning(
+                    "data_fetch_stale symbol=%s latest_date=%s last_date=%s",
+                    symbol,
+                    latest_date,
+                    last_date,
                 )
-                state[symbol] = {
-                    "last_date": last_date,
-                    "status": "delisted"
-                }
-                save_state(state)
+                mark_delisted(symbol, state, last_date, "stale_data")
                 return False
 
             state[symbol] = {
@@ -199,13 +214,18 @@ def update_symbol(symbol, state):
 
             save_state(state)
 
-            print(f"{symbol} updated → {latest_date}")
+            logger.info("data_fetch_saved symbol=%s latest_date=%s rows=%s", symbol, latest_date, len(df))
 
             return True  # success
 
         except Exception as e:
 
-            print(f"{symbol} error: {e}")
+            logger.exception(
+                "data_fetch_error symbol=%s attempt=%s error_type=%s",
+                symbol,
+                attempt + 1,
+                type(e).__name__,
+            )
 
             # added: NoneType errors surface as TypeError (e.g. calling a method on
             # None), so we group TypeError with ValueError and RetryError as signals
@@ -218,24 +238,30 @@ def update_symbol(symbol, state):
             # ----------------------------------------
 
             if attempt == 0:
-                print(f"{symbol} cooldown before retry...")
+                logger.info(
+                    "data_fetch_retry_cooldown symbol=%s seconds=%s",
+                    symbol,
+                    RATE_LIMIT_COOLDOWN,
+                )
                 time.sleep(RATE_LIMIT_COOLDOWN)
             else:
-                print(f"{symbol} failed after retry → skip")
+                logger.warning("data_fetch_failed_after_retry symbol=%s", symbol)
 
                 # added: persist delisted status so the symbol is not retried on
                 # future runs when the error indicates bad/missing data, not just a
                 # transient outage.
                 if is_fatal_error:
-                    print(
-                        f"{symbol} fatal error ({type(e).__name__}) after retry "
-                        f"→ mark delisted"
+                    logger.warning(
+                        "data_fetch_fatal_after_retry symbol=%s error_type=%s",
+                        symbol,
+                        type(e).__name__,
                     )
-                    state[symbol] = {
-                        "last_date": state.get(symbol, {}).get("last_date"),
-                        "status": "delisted"
-                    }
-                    save_state(state)
+                    mark_delisted(
+                        symbol,
+                        state,
+                        state.get(symbol, {}).get("last_date"),
+                        f"fatal_error:{type(e).__name__}",
+                    )
 
     return False
 

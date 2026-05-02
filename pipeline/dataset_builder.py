@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from config.logging_config import get_logger
 from config.settings import (
     FEATURE_DATA_DIR,
     MARKET_ENRICHED_DIR,
@@ -21,6 +22,7 @@ from research.indicators.volume import on_balance_volume, volume_ma
 
 
 REQUIRED_COLUMNS = ["time", "symbol", "open", "high", "low", "close", "volume"]
+logger = get_logger(__name__)
 
 
 def load_active_symbols() -> set[str]:
@@ -59,7 +61,7 @@ def load_symbol_market(symbol: str, market_dir: Path = MARKET_ENRICHED_DIR) -> p
     try:
         df = pd.read_parquet(data_file)
     except Exception as exc:
-        print(f"[WARN] could not read {data_file}: {exc}")
+        logger.exception("feature_dataset_market_read_error file=%s", data_file)
         return pd.DataFrame()
 
     return normalize_market(df, symbol)
@@ -74,7 +76,7 @@ def normalize_market(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
 
     missing = [col for col in REQUIRED_COLUMNS if col not in out.columns]
     if missing:
-        print(f"[WARN] {symbol} missing market columns: {missing}")
+        logger.warning("feature_dataset_missing_columns symbol=%s missing=%s", symbol, missing)
         return pd.DataFrame()
 
     out["symbol"] = symbol.upper()
@@ -149,7 +151,7 @@ def build_feature_dataset(active_only: bool = True) -> pd.DataFrame:
 
         frames.append(compute_indicator_features(df))
         if index % 100 == 0:
-            print(f"Processed {index}/{len(symbols)} symbols")
+            logger.info("feature_dataset_progress processed=%s total=%s", index, len(symbols))
 
     if not frames:
         return pd.DataFrame()
@@ -162,7 +164,7 @@ def build_feature_dataset(active_only: bool = True) -> pd.DataFrame:
 
 def write_partitioned(df: pd.DataFrame, output_dir: Path = FEATURE_DATA_DIR, replace: bool = True) -> None:
     if df.empty:
-        print("No feature rows to write.")
+        logger.info("feature_dataset_no_rows")
         return
 
     staging = output_dir.with_name(f"{output_dir.name}_staging")
@@ -201,10 +203,10 @@ def write_partitioned(df: pd.DataFrame, output_dir: Path = FEATURE_DATA_DIR, rep
 
 
 def build_dataset(active_only: bool = True, replace: bool = True) -> pd.DataFrame:
-    print("Building all-indicator feature dataset from enriched market data...")
+    logger.info("feature_dataset_build_start active_only=%s replace=%s", active_only, replace)
     dataset = build_feature_dataset(active_only=active_only)
     write_partitioned(dataset, replace=replace)
-    print(f"Feature dataset completed: {len(dataset):,} rows")
+    logger.info("feature_dataset_build_complete rows=%s", len(dataset))
     return dataset
 
 

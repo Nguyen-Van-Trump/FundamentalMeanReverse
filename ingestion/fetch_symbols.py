@@ -2,11 +2,14 @@ from vnstock import Listing
 import pandas as pd
 from pathlib import Path
 
+from config.logging_config import get_logger
+
 
 OUTPUT_DIR = Path("data")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 OUTPUT_FILE = OUTPUT_DIR / "symbols.csv"
+logger = get_logger(__name__)
 
 
 def fetch_symbols():
@@ -15,12 +18,17 @@ def fetch_symbols():
     using vnstock Listing API.
     """
 
-    listing = Listing(source="VCI")
+    logger.info("symbol_fetch_start source=VCI")
+    try:
+        listing = Listing(source="VCI")
 
-    df = listing.all_symbols()
+        df = listing.all_symbols()
 
-    if df is None or df.empty:
-        raise RuntimeError("Failed to fetch symbols from vnstock")
+        if df is None or df.empty:
+            raise RuntimeError("Failed to fetch symbols from vnstock")
+    except Exception:
+        logger.exception("symbol_fetch_error source=VCI")
+        raise
 
     # normalize column names
     df.columns = [c.lower() for c in df.columns]
@@ -40,19 +48,16 @@ def fetch_symbols():
     # sort symbols
     df = df.sort_values("symbol").reset_index(drop=True)
 
+    logger.info("symbol_fetch_success source=VCI rows=%s", len(df))
     return df
 
 
 def main():
 
-    print("Fetching all symbols from vnstock...")
-
     df = fetch_symbols()
 
     df.to_csv(OUTPUT_FILE, index=False)
-
-    print(f"Saved {len(df)} symbols to {OUTPUT_FILE}")
-    print(df.head())
+    logger.info("symbol_file_saved file=%s rows=%s", OUTPUT_FILE, len(df))
 
 
 if __name__ == "__main__":

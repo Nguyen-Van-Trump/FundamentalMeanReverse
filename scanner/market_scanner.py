@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from config.logging_config import get_logger
 from config.settings import BASE_DIR, FEATURE_DATA_DIR, PARQUET_ENGINE, STATE_FILE
 from config.strategy_config import (
     DEFAULT_MEAN_REVERSION_CONFIG_FILE,
@@ -16,6 +17,7 @@ from strategies.mean_reversion import MeanReversionConfig, generate_signals
 
 SIGNAL_DATA_DIR = BASE_DIR / "data" / "signals"
 PORTFOLIO_STATE_FILE = BASE_DIR / "data" / "portfolio.json"
+logger = get_logger(__name__)
 
 
 def load_active_symbols() -> set[str]:
@@ -26,7 +28,7 @@ def load_active_symbols() -> set[str]:
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             state = json.load(f)
     except (OSError, json.JSONDecodeError) as exc:
-        print(f"[WARN] cannot read fetch state {STATE_FILE}: {exc}")
+        logger.warning("scan_fetch_state_read_error file=%s error=%s", STATE_FILE, exc)
         return set()
 
     return {
@@ -68,7 +70,7 @@ def load_feature_dataset(
             try:
                 df = pd.read_parquet(data_file)
             except Exception as exc:
-                print(f"[WARN] skipped unreadable feature data {data_file}: {exc}")
+                logger.exception("scan_feature_data_read_error file=%s", data_file)
                 continue
 
             if df.empty:
@@ -95,7 +97,7 @@ def load_open_positions(portfolio_file: Path = PORTFOLIO_STATE_FILE) -> list[dic
         with open(portfolio_file, "r", encoding="utf-8") as f:
             state = json.load(f)
     except (OSError, json.JSONDecodeError) as exc:
-        print(f"[WARN] cannot read portfolio state {portfolio_file}: {exc}")
+        logger.warning("scan_portfolio_state_read_error file=%s error=%s", portfolio_file, exc)
         return []
 
     return list(state.get("positions", []))
@@ -111,34 +113,50 @@ def run_market_scan(
     strategy_config_file: Path | None = DEFAULT_MEAN_REVERSION_CONFIG_FILE,
     config: MeanReversionConfig | None = None,
 ) -> pd.DataFrame:
-    config = config or load_mean_reversion_config(strategy_config_file)
-    features = load_feature_dataset(
-        feature_dir=feature_dir,
-        scan_date=scan_date,
-        lookback_days=lookback_days,
-        active_only=active_only,
-    )
-    positions = load_open_positions(portfolio_file)
-    signals = generate_signals(features, positions=positions, scan_date=scan_date, config=config)
-
-    if signals.empty:
-        print("No signals generated.")
-        return signals
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    signal_date = pd.to_datetime(signals["time"].max()).date().isoformat()
-    output_path = output_dir / f"signals_{signal_date}.csv"
-    signals.to_csv(output_path, index=False)
-
-    parquet_path = output_dir / f"signals_{signal_date}.parquet"
     try:
-        signals.to_parquet(parquet_path, index=False, engine=PARQUET_ENGINE)
-    except Exception as exc:
-        print(f"[WARN] could not write parquet signals: {exc}")
+        logger.info(
+            "scan_start scan_date=%s feature_dir=%s active_only=%s",
+            scan_date,
+            feature_dir,
+            active_only,
+        )
+        config = config or load_mean_reversion_config(strategy_config_file)
+        features = load_feature_dataset(
+            feature_dir=feature_dir,
+            scan_date=scan_date,
+            lookback_days=lookback_days,
+            active_only=active_only,
+        )
+        logger.info("scan_features_loaded scan_date=%s rows=%s", scan_date, len(features))
+        positions = load_open_positions(portfolio_file)
+        signals = generate_signals(features, positions=positions, scan_date=scan_date, config=config)
 
-    print(f"Generated {len(signals)} signals: {output_path}")
-    print(signals[["time", "symbol", "signal", "close", "reason"]].to_string(index=False))
-    return signals
+        if signals.empty:
+            logger.info("scan_complete scan_date=%s signals=0", scan_date)
+            return signals
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        signal_date = pd.to_datetime(signals["time"].max()).date().isoformat()
+        output_path = output_dir / f"signals_{signal_date}.csv"
+        signals.to_csv(output_path, index=False)
+
+        parquet_path = output_dir / f"signals_{signal_date}.parquet"
+        try:
+            signals.to_parquet(parquet_path, index=False, engine=PARQUET_ENGINE)
+        except Exception as exc:
+            logger.exception("scan_signal_parquet_write_error file=%s", parquet_path)
+
+        logger.info(
+            "scan_complete scan_date=%s signal_date=%s signals=%s output=%s",
+            scan_date,
+            signal_date,
+            len(signals),
+            output_path,
+        )
+        return signals
+    except Exception:
+        logger.exception("scan_error scan_date=%s feature_dir=%s", scan_date, feature_dir)
+        raise
 
 
 def _latest_feature_date(feature_dir: Path) -> pd.Timestamp:

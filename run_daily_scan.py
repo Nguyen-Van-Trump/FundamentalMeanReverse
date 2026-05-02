@@ -7,6 +7,7 @@ from config.strategy_config import (
     DEFAULT_MEAN_REVERSION_CONFIG_FILE,
     load_mean_reversion_config,
 )
+from config.logging_config import get_logger
 from pipeline.dataset_builder import build_dataset
 from pipeline.feature_builder import run_feature_builder
 from portfolio.portfolio_manager import PortfolioConfig, PortfolioManager
@@ -17,6 +18,9 @@ from scanner.market_scanner import (
 )
 
 
+logger = get_logger(__name__)
+
+
 def run_daily_scan(
     scan_date: str | None = None,
     portfolio_file: Path = PORTFOLIO_STATE_FILE,
@@ -24,30 +28,38 @@ def run_daily_scan(
     strategy_config_file: Path = DEFAULT_MEAN_REVERSION_CONFIG_FILE,
     initial_cash: float = 300_000_000,
 ) -> None:
-    run_feature_builder()
-    build_dataset()
-    strategy_config = load_mean_reversion_config(strategy_config_file)
+    try:
+        logger.info("daily_scan_start scan_date=%s", scan_date)
+        run_feature_builder()
+        build_dataset()
+        strategy_config = load_mean_reversion_config(strategy_config_file)
 
-    signals = run_market_scan(
-        scan_date=scan_date,
-        output_dir=signal_dir,
-        portfolio_file=portfolio_file,
-        strategy_config_file=strategy_config_file,
-        config=strategy_config,
-    )
+        signals = run_market_scan(
+            scan_date=scan_date,
+            output_dir=signal_dir,
+            portfolio_file=portfolio_file,
+            strategy_config_file=strategy_config_file,
+            config=strategy_config,
+        )
 
-    manager = PortfolioManager(
-        state_file=portfolio_file,
-        config=PortfolioConfig(
-            initial_cash=initial_cash,
-            max_position_pct=strategy_config.position_size_pct,
-        ),
-    )
-    state = manager.apply_signals(signals)
-    print(
-        f"Daily scan complete: signals={len(signals)}, "
-        f"cash={state['cash']:,.0f}, open_positions={len(state['positions'])}"
-    )
+        manager = PortfolioManager(
+            state_file=portfolio_file,
+            config=PortfolioConfig(
+                initial_cash=initial_cash,
+                max_position_pct=strategy_config.position_size_pct,
+            ),
+        )
+        state = manager.apply_signals(signals)
+        logger.info(
+            "daily_scan_complete scan_date=%s signals=%s cash=%.0f open_positions=%s",
+            scan_date,
+            len(signals),
+            state["cash"],
+            len(state["positions"]),
+        )
+    except Exception:
+        logger.exception("daily_scan_error scan_date=%s", scan_date)
+        raise
 
 
 def parse_args() -> argparse.Namespace:

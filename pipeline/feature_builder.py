@@ -3,10 +3,12 @@ from pathlib import Path
 
 import pandas as pd
 
+from config.logging_config import get_logger
 from config.settings import MARKET_DATA_DIR, MARKET_ENRICHED_DIR
 
 
 REQUIRED_MARKET_COLUMNS = ["time", "open", "high", "low", "close", "volume", "symbol"]
+logger = get_logger(__name__)
 
 
 def ensure_dir(path: str):
@@ -77,15 +79,15 @@ def enrich_market(symbol: str):
 
 
 def run_feature_builder():
-    print("Building enriched market data...")
+    logger.info("market_enrichment_start")
 
     for symbol in list_symbols(str(MARKET_DATA_DIR)):
         try:
             enrich_market(symbol)
         except Exception as e:
-            print(f"[ERROR][MARKET] {symbol}: {e}")
+            logger.exception("market_enrichment_error symbol=%s", symbol)
 
-    print("Market enrichment completed.")
+    logger.info("market_enrichment_complete")
 
 
 if __name__ == "__main__":
