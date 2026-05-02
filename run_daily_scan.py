@@ -27,6 +27,7 @@ def run_daily_scan(
     signal_dir: Path = SIGNAL_DATA_DIR,
     strategy_config_file: Path = DEFAULT_MEAN_REVERSION_CONFIG_FILE,
     initial_cash: float = 300_000_000,
+    max_positions: int | None = None,
 ) -> None:
     try:
         logger.info("daily_scan_start scan_date=%s", scan_date)
@@ -47,6 +48,11 @@ def run_daily_scan(
             config=PortfolioConfig(
                 initial_cash=initial_cash,
                 max_position_pct=strategy_config.position_size_pct,
+                max_positions=(
+                    max_positions
+                    if max_positions is not None
+                    else PortfolioConfig.max_positions
+                ),
             ),
         )
         state = manager.apply_signals(signals)
@@ -69,6 +75,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--signal-dir", type=Path, default=SIGNAL_DATA_DIR)
     parser.add_argument("--strategy-config", type=Path, default=DEFAULT_MEAN_REVERSION_CONFIG_FILE)
     parser.add_argument("--initial-cash", type=float, default=300_000_000)
+    parser.add_argument("--max-positions", type=int, default=None)
     return parser.parse_args()
 
 
@@ -80,4 +87,5 @@ if __name__ == "__main__":
         signal_dir=args.signal_dir,
         strategy_config_file=args.strategy_config,
         initial_cash=args.initial_cash,
+        max_positions=args.max_positions,
     )
