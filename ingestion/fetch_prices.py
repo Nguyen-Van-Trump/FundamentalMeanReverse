@@ -125,7 +125,7 @@ def update_symbol(symbol, state):
             # No data → delisted
             # ----------------------------------------
 
-            if df_new is None or df_new.empty:
+            if df_new is None or df_new.empty and (TODAY - last_dt).days > 30:  # added: only mark delisted if the last date is more than 30 days old to avoid false positives from temporary outages
 
                 print(f"{symbol} no new data → mark delisted")
 
@@ -178,12 +178,12 @@ def update_symbol(symbol, state):
             latest_date = str(pd.to_datetime(df["time"]).max().date())
 
             # added: if the latest fetched date is not newer than what we already
-            # have saved, AND it is not today's date, the symbol has gone stale →
+            # have saved, AND it is not within 7 days of today's date, the symbol has gone stale →
             # treat it as delisted so we stop polling it unnecessarily.
-            if last_date and latest_date <= last_date and latest_date != str(TODAY):
+            if last_date and latest_date <= last_date and (TODAY - pd.to_datetime(latest_date).date()).days > 7:
                 print(
                     f"{symbol} latest fetched date ({latest_date}) is not newer "
-                    f"than saved date ({last_date}) and is not today → mark delisted"
+                    f"than saved date ({last_date}) and is not within 7 days of today → mark delisted"
                 )
                 state[symbol] = {
                     "last_date": last_date,
