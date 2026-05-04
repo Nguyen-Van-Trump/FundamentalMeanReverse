@@ -133,7 +133,7 @@ def _dataset_tab() -> None:
 
     st.dataframe(
         schema,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         height=420,
     )
@@ -145,7 +145,7 @@ def _fetch_prices_tab() -> None:
     st.subheader("Active Symbols")
     st.dataframe(
         active_symbols,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         height=260,
     )
@@ -203,7 +203,7 @@ def _scan_tab(strategy_config: MeanReversionConfig) -> None:
     st.subheader("Stock Positions")
     st.dataframe(
         pd.DataFrame(state.get("positions", [])),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         height=260,
     )
@@ -211,7 +211,7 @@ def _scan_tab(strategy_config: MeanReversionConfig) -> None:
     st.subheader("Buy / Sell Orders")
     orders = st.session_state.get("scan_orders", pd.DataFrame())
     if isinstance(orders, pd.DataFrame) and not orders.empty:
-        st.dataframe(orders, use_container_width=True, hide_index=True, height=260)
+        st.dataframe(orders, width="stretch", hide_index=True, height=260)
     else:
         st.info("Run the scan pipeline to see generated buy/sell orders.")
 
