@@ -10,11 +10,12 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from config.settings import FEATURE_DATA_DIR, MARKET_DATA_DIR, SYMBOL_FILE
+from config.settings import FEATURE_DATA_DIR, LOG_FILE, MARKET_DATA_DIR, SYMBOL_FILE
 from config.strategy_config import (
     DEFAULT_MEAN_REVERSION_CONFIG_FILE,
     load_mean_reversion_config,
 )
+from ingestion import fetch_prices
 from portfolio.portfolio_manager import PORTFOLIO_STATE_FILE
 from research.backtest import BacktestConfig, run_backtest
 from run_daily_scan import run_daily_scan
@@ -30,10 +31,14 @@ def main() -> None:
     st.title("Mean Reversion Dashboard")
 
     strategy_config = _strategy_editor()
-    tab_data, tab_scan, tab_graphs = st.tabs(["Dataset", "Scan Pipeline", "Graphs"])
+    tab_data, tab_prices, tab_scan, tab_graphs = st.tabs(
+        ["Dataset", "Fetch Prices", "Scan Pipeline", "Graphs"]
+    )
 
     with tab_data:
         _dataset_tab()
+    with tab_prices:
+        _fetch_prices_tab()
     with tab_scan:
         _scan_tab(strategy_config)
     with tab_graphs:
@@ -131,6 +136,32 @@ def _dataset_tab() -> None:
         use_container_width=True,
         hide_index=True,
         height=420,
+    )
+
+
+def _fetch_prices_tab() -> None:
+    active_symbols = _active_symbols()
+
+    st.subheader("Active Symbols")
+    st.dataframe(
+        active_symbols,
+        use_container_width=True,
+        hide_index=True,
+        height=260,
+    )
+
+    if st.button("Fetch Prices Data", type="primary"):
+        with st.spinner("Fetching price data..."):
+            log = _capture_file_log(fetch_prices.main)
+        st.session_state["fetch_prices_log"] = log
+        _show_task_result(log, "Price fetch finished.")
+
+    st.subheader("New Fetch Log")
+    st.text_area(
+        "Fetch log",
+        st.session_state.get("fetch_prices_log", ""),
+        height=320,
+        label_visibility="collapsed",
     )
 
 
@@ -286,6 +317,24 @@ def _capture_output(fn, *args, **kwargs) -> str:
     return buffer.getvalue()
 
 
+def _capture_file_log(fn, *args, **kwargs) -> str:
+    before_size = LOG_FILE.stat().st_size if LOG_FILE.exists() else 0
+    output = _capture_output(fn, *args, **kwargs)
+    new_log = _read_new_log(before_size)
+    return "\n".join(part for part in [output.strip(), new_log.strip()] if part)
+
+
+def _read_new_log(before_size: int) -> str:
+    if not LOG_FILE.exists():
+        return ""
+    try:
+        with open(LOG_FILE, "r", encoding="utf-8") as f:
+            f.seek(before_size)
+            return f.read()
+    except OSError as exc:
+        return f"[ERROR] Could not read fetch log: {exc}"
+
+
 def _show_task_result(log: str, success_message: str) -> None:
     if "[ERROR]" in log:
         st.error("Task failed. Check the logs below.")
@@ -346,6 +395,24 @@ def _active_symbol_count() -> int:
     except (OSError, json.JSONDecodeError):
         return 0
     return sum(1 for item in state.values() if str(item.get("status", "")).lower() == "active")
+
+
+def _active_symbols() -> pd.DataFrame:
+    state_file = MARKET_DATA_DIR.parent / "fetch_state.json"
+    if not state_file.exists():
+        return pd.DataFrame(columns=["symbol", "last_date"])
+    try:
+        with open(state_file, "r", encoding="utf-8") as f:
+            state = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return pd.DataFrame(columns=["symbol", "last_date"])
+
+    rows = [
+        {"symbol": symbol, "last_date": item.get("last_date", "")}
+        for symbol, item in state.items()
+        if str(item.get("status", "")).lower() == "active"
+    ]
+    return pd.DataFrame(rows, columns=["symbol", "last_date"]).sort_values("symbol")
 
 
 def _position_limit() -> int:
