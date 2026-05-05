@@ -5,7 +5,8 @@ from pathlib import Path
 from datetime import datetime
 
 from vnstock import Quote, register_user
-from requests.exceptions import RetryError  # added: needed to catch RetryError from HTTP layer
+from requests.exceptions import RetryError as RequestsRetryError
+from tenacity import RetryError as TenacityRetryError
 
 from config.logging_config import get_logger
 from config.settings import (
@@ -76,6 +77,21 @@ def fetch_price(symbol, start_date):
 
     logger.info("data_fetch_success symbol=%s start_date=%s rows=%s", symbol, start_date, len(df))
     return df
+
+
+def is_delistable_fetch_error(error):
+    delistable_errors = (TypeError, ValueError, RequestsRetryError)
+
+    if isinstance(error, delistable_errors):
+        return True
+
+    if isinstance(error, TenacityRetryError):
+        try:
+            return isinstance(error.last_attempt.exception(), delistable_errors)
+        except AttributeError:
+            return False
+
+    return False
 
 
 def mark_delisted(symbol, state, last_date, reason):
@@ -231,7 +247,7 @@ def update_symbol(symbol, state):
             # None), so we group TypeError with ValueError and RetryError as signals
             # that the symbol's data is structurally broken rather than a transient
             # network glitch. After the second attempt we give up and mark delisted.
-            is_fatal_error = isinstance(e, (TypeError, ValueError, RetryError))
+            is_fatal_error = is_delistable_fetch_error(e)
 
             # ----------------------------------------
             # Cooldown before retry
