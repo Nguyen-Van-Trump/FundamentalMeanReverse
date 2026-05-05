@@ -10,7 +10,8 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from config.settings import FEATURE_DATA_DIR, LOG_FILE, MARKET_DATA_DIR, SYMBOL_FILE
+from config.logging_config import get_log_file
+from config.settings import FEATURE_DATA_DIR, MARKET_DATA_DIR, SYMBOL_FILE
 from config.strategy_config import (
     DEFAULT_MEAN_REVERSION_CONFIG_FILE,
     load_mean_reversion_config,
@@ -152,7 +153,7 @@ def _fetch_prices_tab() -> None:
 
     if st.button("Fetch Prices Data", type="primary"):
         with st.spinner("Fetching price data..."):
-            log = _capture_file_log(fetch_prices.main)
+            log = _capture_file_log("data_fetch", fetch_prices.main)
         st.session_state["fetch_prices_log"] = log
         _show_task_result(log, "Price fetch finished.")
 
@@ -180,7 +181,8 @@ def _scan_tab(strategy_config: MeanReversionConfig) -> None:
         before_count = len(before_state.get("transactions", []))
 
         with st.spinner("Running scan pipeline..."):
-            log = _capture_output(
+            log = _capture_file_log(
+                "scan",
                 run_daily_scan,
                 scan_date=scan_date.isoformat(),
                 initial_cash=float(initial_cash),
@@ -313,26 +315,27 @@ def _capture_output(fn, *args, **kwargs) -> str:
         with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
             fn(*args, **kwargs)
     except Exception as exc:
-        print(f"[ERROR] {exc}", file=buffer)
+        buffer.write(f"[ERROR] {exc}\n")
     return buffer.getvalue()
 
 
-def _capture_file_log(fn, *args, **kwargs) -> str:
-    before_size = LOG_FILE.stat().st_size if LOG_FILE.exists() else 0
+def _capture_file_log(category: str, fn, *args, **kwargs) -> str:
+    log_file = get_log_file(category)
+    before_size = log_file.stat().st_size if log_file.exists() else 0
     output = _capture_output(fn, *args, **kwargs)
-    new_log = _read_new_log(before_size)
+    new_log = _read_new_log(log_file, before_size)
     return "\n".join(part for part in [output.strip(), new_log.strip()] if part)
 
 
-def _read_new_log(before_size: int) -> str:
-    if not LOG_FILE.exists():
+def _read_new_log(log_file: Path, before_size: int) -> str:
+    if not log_file.exists():
         return ""
     try:
-        with open(LOG_FILE, "r", encoding="utf-8") as f:
+        with open(log_file, "r", encoding="utf-8") as f:
             f.seek(before_size)
             return f.read()
     except OSError as exc:
-        return f"[ERROR] Could not read fetch log: {exc}"
+        return f"[ERROR] Could not read {log_file.name}: {exc}"
 
 
 def _show_task_result(log: str, success_message: str) -> None:

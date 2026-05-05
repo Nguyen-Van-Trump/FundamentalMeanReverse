@@ -14,7 +14,7 @@ from datetime import date
 import os
 from dotenv import load_dotenv
 
-from config.logging_config import get_logger
+from config.logging_config import get_log_file, get_logger
 
 
 # --------------------------------------------------
@@ -45,7 +45,7 @@ MARKET_DATA_DIR = DATA_DIR / "market"
 MARKET_ENRICHED_DIR = DATA_DIR / "market_enriched"
 
 LOG_DIR = BASE_DIR / "logs"
-logger = get_logger(__name__)
+logger = get_logger(__name__, "scan")
 
 
 # --------------------------------------------------
@@ -113,7 +113,9 @@ SAFE_UPDATE_LOOKBACK_DAYS = 5
 # Logging
 # --------------------------------------------------
 
-LOG_FILE = LOG_DIR / "pipeline.log"
+DATA_FETCH_LOG_FILE = get_log_file("data_fetch")
+SCAN_LOG_FILE = get_log_file("scan")
+ORDER_LOG_FILE = get_log_file("order")
 
 
 # --------------------------------------------------

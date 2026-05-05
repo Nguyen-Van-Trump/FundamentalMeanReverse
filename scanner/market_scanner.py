@@ -17,7 +17,7 @@ from strategies.mean_reversion import MeanReversionConfig, generate_signals
 
 SIGNAL_DATA_DIR = BASE_DIR / "data" / "signals"
 PORTFOLIO_STATE_FILE = BASE_DIR / "data" / "portfolio.json"
-logger = get_logger(__name__)
+logger = get_logger(__name__, "scan")
 
 
 def load_active_symbols() -> set[str]:

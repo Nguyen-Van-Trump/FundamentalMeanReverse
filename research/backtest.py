@@ -6,8 +6,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from config.logging_config import get_logger
 from config.settings import FEATURE_DATA_DIR
 from strategies.mean_reversion import MeanReversionConfig, generate_signals
+
+
+logger = get_logger(__name__, "scan")
 
 
 @dataclass(frozen=True)
@@ -132,7 +136,7 @@ def _load_features_for_backtest(
             try:
                 frame = pd.read_parquet(data_file)
             except Exception as exc:
-                print(f"[WARN] skipped unreadable feature data {data_file}: {exc}")
+                logger.exception("backtest_feature_data_read_error file=%s", data_file)
                 continue
             if not frame.empty:
                 frames.append(frame)

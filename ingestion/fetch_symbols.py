@@ -9,7 +9,7 @@ OUTPUT_DIR = Path("data")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 OUTPUT_FILE = OUTPUT_DIR / "symbols.csv"
-logger = get_logger(__name__)
+logger = get_logger(__name__, "data_fetch")
 
 
 def fetch_symbols():

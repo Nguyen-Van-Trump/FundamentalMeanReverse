@@ -8,7 +8,7 @@ from config.settings import MARKET_DATA_DIR, MARKET_ENRICHED_DIR
 
 
 REQUIRED_MARKET_COLUMNS = ["time", "open", "high", "low", "close", "volume", "symbol"]
-logger = get_logger(__name__)
+logger = get_logger(__name__, "scan")
 
 
 def ensure_dir(path: str):

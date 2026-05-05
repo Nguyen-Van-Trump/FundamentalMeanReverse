@@ -22,7 +22,7 @@ from config.settings import (
     TODAY
 )
 
-logger = get_logger(__name__)
+logger = get_logger(__name__, "data_fetch")
 
 # ----------------------------------------
 # State management

@@ -1,29 +1,36 @@
 from __future__ import annotations
 
 import logging
-from logging.handlers import TimedRotatingFileHandler
+from datetime import date
 from pathlib import Path
 
 
-LOG_FILE = Path(__file__).resolve().parent.parent / "logs" / "pipeline.log"
+LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+LOG_CATEGORIES = {"data_fetch", "scan", "order"}
 
 
-def get_logger(name: str) -> logging.Logger:
-    """Return a project logger configured for daily rotating file logs."""
+def get_log_file(category: str) -> Path:
+    if category not in LOG_CATEGORIES:
+        raise ValueError(
+            f"invalid log category {category!r}; expected one of {sorted(LOG_CATEGORIES)}"
+        )
+    return LOG_DIR / f"{category}_{date.today().isoformat()}.log"
+
+
+def get_logger(name: str, category: str) -> logging.Logger:
+    """Return a project logger writing to a category-specific daily file."""
     logger = logging.getLogger(name)
-    if logger.handlers:
-        return logger
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_file = get_log_file(category)
+    log_path = str(log_file.resolve())
 
-    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    handler = TimedRotatingFileHandler(
-        LOG_FILE,
-        when="midnight",
-        backupCount=30,
-        encoding="utf-8",
-    )
-    handler.suffix = "%Y-%m-%d"
+    for handler in logger.handlers:
+        if isinstance(handler, logging.FileHandler) and handler.baseFilename == log_path:
+            return logger
+
+    handler = logging.FileHandler(log_file, encoding="utf-8")
     handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT))
 
     logger.setLevel(logging.INFO)

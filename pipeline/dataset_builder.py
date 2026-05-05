@@ -22,7 +22,7 @@ from research.indicators.volume import on_balance_volume, volume_ma
 
 
 REQUIRED_COLUMNS = ["time", "symbol", "open", "high", "low", "close", "volume"]
-logger = get_logger(__name__)
+logger = get_logger(__name__, "scan")
 
 
 def load_active_symbols() -> set[str]:

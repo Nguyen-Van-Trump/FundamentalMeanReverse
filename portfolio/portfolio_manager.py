@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from config.logging_config import get_logger
 from config.strategy_config import (
     DEFAULT_MEAN_REVERSION_CONFIG_FILE,
     load_mean_reversion_config,
@@ -16,6 +17,7 @@ from config.settings import BASE_DIR
 
 PORTFOLIO_STATE_FILE = BASE_DIR / "data" / "portfolio.json"
 SIGNAL_DATA_DIR = BASE_DIR / "data" / "signals"
+logger = get_logger(__name__, "order")
 
 
 @dataclass(frozen=True)
@@ -40,8 +42,23 @@ class PortfolioManager:
     def apply_signals(self, signals: pd.DataFrame) -> dict:
         signals = self._normalize_signals(signals)
         if signals.empty:
+            logger.info(
+                "portfolio_apply_signals_skip_empty state_file=%s cash=%.0f open_positions=%s",
+                self.state_file,
+                float(self.state["cash"]),
+                len(self.state["positions"]),
+            )
             return self.state
 
+        starting_cash = float(self.state["cash"])
+        starting_positions = len(self.state["positions"])
+        logger.info(
+            "portfolio_apply_signals_start state_file=%s signals=%s cash=%.0f open_positions=%s",
+            self.state_file,
+            len(signals),
+            starting_cash,
+            starting_positions,
+        )
         self._mark_to_market(signals)
 
         sold_symbols = set()
@@ -51,15 +68,25 @@ class PortfolioManager:
 
         for _, signal in signals[signals["signal"] == "BUY"].iterrows():
             if signal["symbol"] in sold_symbols:
+                logger.info("order_buy_skipped symbol=%s reason=sold_same_run", signal["symbol"])
                 continue
             self._buy(signal)
 
         self.state["last_signal_time"] = signals["time"].max().isoformat()
         self._save_state()
+        logger.info(
+            "portfolio_apply_signals_complete state_file=%s signals=%s cash=%.0f open_positions=%s transactions=%s",
+            self.state_file,
+            len(signals),
+            float(self.state["cash"]),
+            len(self.state["positions"]),
+            len(self.state["transactions"]),
+        )
         return self.state
 
     def _load_state(self) -> dict:
         if not self.state_file.exists():
+            logger.info("portfolio_state_new file=%s", self.state_file)
             return {
                 "cash": self.config.initial_cash,
                 "positions": [],
@@ -70,7 +97,9 @@ class PortfolioManager:
         try:
             with open(self.state_file, "r", encoding="utf-8") as f:
                 state = json.load(f)
-        except (OSError, json.JSONDecodeError):
+            logger.info("portfolio_state_loaded file=%s", self.state_file)
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.exception("portfolio_state_load_error file=%s", self.state_file)
             state = {}
 
         state.setdefault("cash", self.config.initial_cash)
@@ -80,9 +109,14 @@ class PortfolioManager:
         return state
 
     def _save_state(self) -> None:
-        self.state_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.state_file, "w", encoding="utf-8") as f:
-            json.dump(self.state, f, indent=2, ensure_ascii=False)
+        try:
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.state_file, "w", encoding="utf-8") as f:
+                json.dump(self.state, f, indent=2, ensure_ascii=False)
+            logger.info("portfolio_state_saved file=%s", self.state_file)
+        except OSError:
+            logger.exception("portfolio_state_save_error file=%s", self.state_file)
+            raise
 
     def _normalize_signals(self, signals: pd.DataFrame) -> pd.DataFrame:
         if signals is None or signals.empty:
@@ -116,8 +150,15 @@ class PortfolioManager:
     def _buy(self, signal: pd.Series) -> None:
         symbol = signal["symbol"]
         if self._find_position(symbol) is not None:
+            logger.info("order_buy_skipped symbol=%s reason=position_exists", symbol)
             return
         if len(self.state["positions"]) >= self.config.max_positions:
+            logger.info(
+                "order_buy_skipped symbol=%s reason=max_positions current=%s max=%s",
+                symbol,
+                len(self.state["positions"]),
+                self.config.max_positions,
+            )
             return
 
         close = float(signal["close"])
@@ -130,6 +171,12 @@ class PortfolioManager:
         quantity = (quantity // self.config.lot_size) * self.config.lot_size
 
         if quantity <= 0:
+            logger.info(
+                "order_buy_skipped symbol=%s reason=quantity_non_positive cash=%.0f close=%.4f",
+                symbol,
+                float(self.state["cash"]),
+                close,
+            )
             return
 
         cost = quantity * close
@@ -146,11 +193,20 @@ class PortfolioManager:
         }
         self.state["positions"].append(position)
         self._record_transaction(signal, "BUY", quantity, close, cost)
+        logger.info(
+            "order_buy_executed symbol=%s quantity=%s price=%.4f value=%.0f cash=%.0f",
+            symbol,
+            quantity,
+            close,
+            cost,
+            float(self.state["cash"]),
+        )
 
     def _sell(self, signal: pd.Series) -> bool:
         symbol = signal["symbol"]
         position = self._find_position(symbol)
         if position is None:
+            logger.info("order_sell_skipped symbol=%s reason=no_position", symbol)
             return False
 
         close = float(signal["close"])
@@ -175,6 +231,15 @@ class PortfolioManager:
             item for item in self.state["positions"] if item.get("symbol") != symbol
         ]
         self._record_transaction(signal, "SELL", quantity, close, proceeds, pnl=pnl)
+        logger.info(
+            "order_sell_executed symbol=%s quantity=%s price=%.4f value=%.0f pnl=%.0f cash=%.0f",
+            symbol,
+            quantity,
+            close,
+            proceeds,
+            pnl,
+            float(self.state["cash"]),
+        )
         return True
 
     def _find_position(self, symbol: str) -> dict | None:
@@ -237,7 +302,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-if __name__ == "__main__":
+def main() -> None:
     args = parse_args()
     strategy_config = load_mean_reversion_config(args.strategy_config)
     config = PortfolioConfig(
@@ -248,7 +313,16 @@ if __name__ == "__main__":
     )
     manager = PortfolioManager(args.state_file, config)
     state = manager.apply_signals(load_signals(args.signals))
-    print(
-        f"Portfolio updated: cash={state['cash']:,.0f}, "
-        f"open_positions={len(state['positions'])}"
+    logger.info(
+        "portfolio_cli_complete cash=%.0f open_positions=%s",
+        state["cash"],
+        len(state["positions"]),
     )
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        logger.exception("portfolio_cli_error")
+        raise

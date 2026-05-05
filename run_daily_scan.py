@@ -18,7 +18,7 @@ from scanner.market_scanner import (
 )
 
 
-logger = get_logger(__name__)
+logger = get_logger(__name__, "scan")
 
 
 def run_daily_scan(
