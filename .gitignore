@@ -34,3 +34,5 @@ notebooks/
 
 # Environment secrets
 .env
+
+AGENTS.md
