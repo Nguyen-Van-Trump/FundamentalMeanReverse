@@ -107,6 +107,13 @@ def _strategy_editor() -> MeanReversionConfig:
             value=int(current["min_hold_days"]),
             step=1,
         ),
+        "risk_free_rate": st.sidebar.number_input(
+            "Risk-free rate",
+            min_value=0.0,
+            value=float(current.get("risk_free_rate", 0.05)),
+            step=0.005,
+            format="%.4f",
+        ),
     }
 
     if st.sidebar.button("Save Parameters"):
@@ -375,6 +382,15 @@ def _backtest_tab() -> None:
             step=1,
             key="backtest_min_hold_days",
         )
+        risk_free_rate = st.number_input(
+            "Risk-free rate",
+            min_value=0.0,
+            value=float(st.session_state.get("backtest_risk_free_rate", strategy_current.get("risk_free_rate", 0.05))),
+            step=0.005,
+            format="%.4f",
+            help="Annual risk-free rate used to calculate Sharpe ratio.",
+            key="backtest_risk_free_rate",
+        )
 
         with st.expander("Parameter notes"):
             st.dataframe(
@@ -428,6 +444,10 @@ def _backtest_tab() -> None:
                             "Parameter": "Minimum hold days",
                             "Explanation": "Minimum days to hold before take-profit or stop rules can sell.",
                         },
+                        {
+                            "Parameter": "Risk-free rate",
+                            "Explanation": "Annual risk-free rate subtracted from returns when calculating Sharpe ratio.",
+                        },
                     ]
                 ),
                 width="stretch",
@@ -448,6 +468,7 @@ def _backtest_tab() -> None:
         stop_loss_pct=float(stop_loss_pct),
         position_size_pct=float(position_size_pct),
         min_hold_days=int(min_hold_days),
+        risk_free_rate=float(risk_free_rate),
     )
     backtest_runtime_config = BacktestConfig(
         initial_cash=initial_cash,
@@ -535,18 +556,25 @@ def _backtest_tab() -> None:
         except Exception as exc:
             st.error(f"Could not save backtest result: {exc}")
 
-    equity_curve["pnl_pct"] = equity_curve["pnl"] / backtest_initial_cash * 100
+    equity_curve["daily_return_pct"] = equity_curve["return"] * 100
     equity_curve["drawdown_pct"] = equity_curve["drawdown"] * 100
     equity_curve["portfolio_value_mil_vnd"] = equity_curve["equity"] / 1_000_000
+    risk_free_rate = float(result.metrics.get("risk_free_rate", 0.05))
 
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Total PnL", f"{result.metrics['total_return']:.2%}")
-    m2.metric("Max Drawdown", f"{result.metrics['max_drawdown']:.2%}")
-    m3.metric("Sharpe Ratio", f"{result.metrics['sharpe_ratio']:.2f}")
-    m4.metric("Final Value", f"{result.metrics['final_equity'] / 1_000_000:,.2f} Mil. VND")
+    row1_col1, row1_col2, row1_col3, row1_col4 = st.columns(4)
+    row1_col1.metric("Total PnL", f"{result.metrics['total_return']:.2%}")
+    row1_col2.metric("Final Value", f"{result.metrics['final_equity'] / 1_000_000:,.2f} Mil. VND")
+    row1_col3.metric("Average Daily Return", f"{equity_curve['return'].mean():.2%}")
+    row1_col4.metric("Max Daily Return", f"{equity_curve['return'].max():.2%}")
 
-    st.subheader("PnL (%)")
-    st.line_chart(equity_curve, x="time", y="pnl_pct", y_label="Percent")
+    row2_col1, row2_col2, row2_col3, row2_col4 = st.columns(4)
+    row2_col1.metric("Average Drawdown", f"{equity_curve['drawdown'].mean():.2%}")
+    row2_col2.metric("Max Drawdown", f"{result.metrics['max_drawdown']:.2%}")
+    row2_col3.metric("Sharpe Ratio", f"{result.metrics['sharpe_ratio']:.2f}")
+    row2_col4.metric("Risk-Free Rate", f"{risk_free_rate:.2%}")
+
+    st.subheader("Daily Return (%)")
+    st.line_chart(equity_curve, x="time", y="daily_return_pct", y_label="Percent")
 
     st.subheader("Drawdown (%)")
     st.line_chart(equity_curve, x="time", y="drawdown_pct", y_label="Percent")
@@ -582,6 +610,7 @@ def _apply_pending_loaded_backtest_form_state() -> None:
         "backtest_trailing_stop_loss_pct": float(strategy_values["trailing_stop_loss_pct"]),
         "backtest_stop_loss_pct": float(strategy_values["stop_loss_pct"]),
         "backtest_min_hold_days": int(strategy_values["min_hold_days"]),
+        "backtest_risk_free_rate": float(strategy_values.get("risk_free_rate", 0.05)),
     }
     start_date = _parse_iso_date(loaded_state.get("start_date"))
     end_date = _parse_iso_date(loaded_state.get("end_date"))
@@ -615,6 +644,7 @@ def _save_backtest_result(backtest_state: dict) -> Path:
         },
         "summary": {
             "sharpe_ratio": result.metrics.get("sharpe_ratio", 0.0),
+            "risk_free_rate": result.metrics.get("risk_free_rate", 0.05),
             "max_drawdown": result.metrics.get("max_drawdown", 0.0),
             "portfolio_return": result.metrics.get("total_return", 0.0),
         },
@@ -688,6 +718,8 @@ def _saved_backtest_metrics(raw: dict) -> dict[str, float]:
         metrics["max_drawdown"] = summary["max_drawdown"]
     if "sharpe_ratio" not in metrics and "sharpe_ratio" in summary:
         metrics["sharpe_ratio"] = summary["sharpe_ratio"]
+    if "risk_free_rate" not in metrics and "risk_free_rate" in summary:
+        metrics["risk_free_rate"] = summary["risk_free_rate"]
     if "final_equity" not in metrics:
         metrics["final_equity"] = (
             float(equity_curve["equity"].iloc[-1])
@@ -700,6 +732,7 @@ def _saved_backtest_metrics(raw: dict) -> dict[str, float]:
     metrics.setdefault("total_return", 0.0)
     metrics.setdefault("max_drawdown", 0.0)
     metrics.setdefault("sharpe_ratio", 0.0)
+    metrics.setdefault("risk_free_rate", 0.05)
     return {key: float(value or 0) for key, value in metrics.items()}
 
 
