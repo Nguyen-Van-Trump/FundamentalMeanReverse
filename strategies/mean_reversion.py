@@ -33,6 +33,7 @@ class MeanReversionConfig:
     stop_loss_pct: float = -0.03
     position_size_pct: float = 0.05
     min_hold_days: int = 3
+    risk_free_rate: float = 0.05
 
 
 REQUIRED_BUY_COLUMNS = (

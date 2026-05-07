@@ -51,7 +51,7 @@ def run_backtest(
         lookback_days=bt_config.lookback_days,
     )
     if features.empty:
-        return _empty_result(bt_config.initial_cash)
+        return _empty_result(bt_config.initial_cash, strategy_config.risk_free_rate)
 
     cash = float(bt_config.initial_cash)
     positions: dict[str, dict] = {}
@@ -112,7 +112,11 @@ def run_backtest(
         equity_curve=equity_curve,
         transactions=transactions_df,
         positions=positions_df,
-        metrics=_compute_metrics(equity_curve, bt_config.initial_cash),
+        metrics=_compute_metrics(
+            equity_curve,
+            bt_config.initial_cash,
+            strategy_config.risk_free_rate,
+        ),
     )
 
 
@@ -249,7 +253,11 @@ def _transaction(
     return tx
 
 
-def _compute_metrics(equity_curve: pd.DataFrame, initial_cash: float) -> dict[str, float]:
+def _compute_metrics(
+    equity_curve: pd.DataFrame,
+    initial_cash: float,
+    risk_free_rate: float,
+) -> dict[str, float]:
     if equity_curve.empty:
         return {
             "final_equity": initial_cash,
@@ -257,12 +265,15 @@ def _compute_metrics(equity_curve: pd.DataFrame, initial_cash: float) -> dict[st
             "total_return": 0.0,
             "max_drawdown": 0.0,
             "sharpe_ratio": 0.0,
+            "risk_free_rate": risk_free_rate,
         }
 
     returns = equity_curve["return"].dropna()
     sharpe = 0.0
     if len(returns) > 1 and returns.std(ddof=0) > 0:
-        sharpe = float((returns.mean() / returns.std(ddof=0)) * np.sqrt(252))
+        daily_risk_free_rate = (1 + risk_free_rate) ** (1 / 252) - 1
+        excess_returns = returns - daily_risk_free_rate
+        sharpe = float((excess_returns.mean() / returns.std(ddof=0)) * np.sqrt(252))
 
     final_equity = float(equity_curve["equity"].iloc[-1])
     return {
@@ -271,6 +282,7 @@ def _compute_metrics(equity_curve: pd.DataFrame, initial_cash: float) -> dict[st
         "total_return": final_equity / initial_cash - 1,
         "max_drawdown": float(equity_curve["drawdown"].min()),
         "sharpe_ratio": sharpe,
+        "risk_free_rate": risk_free_rate,
     }
 
 
@@ -281,7 +293,7 @@ def _normalize_date(value: str | pd.Timestamp, name: str) -> pd.Timestamp:
     return out.normalize()
 
 
-def _empty_result(initial_cash: float) -> BacktestResult:
+def _empty_result(initial_cash: float, risk_free_rate: float = 0.0) -> BacktestResult:
     return BacktestResult(
         equity_curve=pd.DataFrame(
             columns=["time", "cash", "positions_value", "equity", "pnl", "return", "drawdown"]
@@ -294,5 +306,6 @@ def _empty_result(initial_cash: float) -> BacktestResult:
             "total_return": 0.0,
             "max_drawdown": 0.0,
             "sharpe_ratio": 0.0,
+            "risk_free_rate": risk_free_rate,
         },
     )
