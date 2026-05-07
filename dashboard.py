@@ -203,14 +203,19 @@ def _scan_tab(strategy_config: MeanReversionConfig) -> None:
 
     state = _load_portfolio_state()
     summary = _portfolio_summary(state)
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total Portfolio Value", _money(summary["portfolio_value"]))
     c2.metric("Cash", _money(summary["cash"]))
     c3.metric("Stock Positions", _money(summary["positions_value"]))
+    c4.metric("Stocks In Portfolio", f"{summary['stock_count']:,}")
 
     st.subheader("Stock Positions")
-    st.dataframe(
+    positions_df = _format_number_columns(
         pd.DataFrame(state.get("positions", [])),
+        ["market_value"],
+    )
+    st.dataframe(
+        positions_df,
         width="stretch",
         hide_index=True,
         height=260,
@@ -792,7 +797,17 @@ def _portfolio_summary(state: dict) -> dict:
         "cash": cash,
         "positions_value": positions_value,
         "portfolio_value": cash + positions_value,
+        "stock_count": len(positions),
     }
+
+
+def _format_number_columns(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    out = df.copy()
+    for column in columns:
+        if column in out.columns:
+            values = pd.to_numeric(out[column], errors="coerce")
+            out[column] = values.map(lambda value: "" if pd.isna(value) else f"{value:,.0f}")
+    return out
 
 
 def _orders_from_transactions(transactions: list[dict]) -> pd.DataFrame:
