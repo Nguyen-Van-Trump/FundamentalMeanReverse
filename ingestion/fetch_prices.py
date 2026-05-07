@@ -60,6 +60,36 @@ def symbol_file(symbol):
     return MARKET_DATA_DIR / f"symbol={symbol}" / "data.parquet"
 
 
+def filter_delisted_symbols(symbols, state):
+
+    delisted_symbols = []
+    active_symbols = []
+
+    for symbol in symbols:
+        if state.get(symbol, {}).get("status") == "delisted":
+            delisted_symbols.append(symbol)
+        else:
+            active_symbols.append(symbol)
+
+    return active_symbols, delisted_symbols
+
+
+def log_delisted_symbols(delisted_symbols, state):
+
+    if not delisted_symbols:
+        logger.info("data_fetch_delisted_filter_count count=0")
+        return
+
+    logger.info("data_fetch_delisted_filter_count count=%s", len(delisted_symbols))
+
+    for symbol in delisted_symbols:
+        logger.info(
+            "data_fetch_skip_delisted symbol=%s last_date=%s",
+            symbol,
+            state.get(symbol, {}).get("last_date"),
+        )
+
+
 # ----------------------------------------
 # Fetch logic
 # ----------------------------------------
@@ -290,11 +320,15 @@ def main():
 
     register_user(api_key=VNSTOCK_API_KEY)
 
-    symbols = load_symbols()
-
     state = load_state()
 
-    for symbol in symbols:
+    symbols = load_symbols()
+
+    active_symbols, delisted_symbols = filter_delisted_symbols(symbols, state)
+
+    log_delisted_symbols(delisted_symbols, state)
+
+    for symbol in active_symbols:
 
         updated = update_symbol(symbol, state)
 
