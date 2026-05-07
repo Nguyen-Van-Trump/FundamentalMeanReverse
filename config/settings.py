@@ -14,7 +14,7 @@ from datetime import date
 import os
 from dotenv import load_dotenv
 
-from config.logging_config import get_log_file, get_logger
+from config.logging_config import LOG_CATEGORY_DIRS, get_log_file, get_logger
 
 
 # --------------------------------------------------
@@ -128,6 +128,7 @@ DIRECTORIES = [
     MARKET_DATA_DIR,
     MARKET_ENRICHED_DIR,
     LOG_DIR,
+    *(LOG_DIR / subdir for subdir in LOG_CATEGORY_DIRS.values()),
 ]
 
 for directory in DIRECTORIES:

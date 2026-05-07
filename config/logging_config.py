@@ -9,6 +9,11 @@ LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 LOG_CATEGORIES = {"data_fetch", "scan", "order"}
+LOG_CATEGORY_DIRS = {
+    "data_fetch": "fetch",
+    "scan": "scan",
+    "order": "order",
+}
 
 
 def get_log_file(category: str) -> Path:
@@ -16,14 +21,14 @@ def get_log_file(category: str) -> Path:
         raise ValueError(
             f"invalid log category {category!r}; expected one of {sorted(LOG_CATEGORIES)}"
         )
-    return LOG_DIR / f"{category}_{date.today().isoformat()}.log"
+    return LOG_DIR / LOG_CATEGORY_DIRS[category] / f"{category}_{date.today().isoformat()}.log"
 
 
 def get_logger(name: str, category: str) -> logging.Logger:
     """Return a project logger writing to a category-specific daily file."""
     logger = logging.getLogger(name)
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_file = get_log_file(category)
+    log_file.parent.mkdir(parents=True, exist_ok=True)
     log_path = str(log_file.resolve())
 
     for handler in logger.handlers:
