@@ -34,5 +34,6 @@ notebooks/
 
 # Environment secrets
 .env
+config/mean_reversion.json
 
 AGENTS.md
