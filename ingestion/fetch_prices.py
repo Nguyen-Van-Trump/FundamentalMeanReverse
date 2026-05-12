@@ -3,6 +3,7 @@ import json
 import time
 from pathlib import Path
 from datetime import datetime
+from collections.abc import Callable
 
 from vnstock import Quote, register_user
 from requests.exceptions import RetryError as RequestsRetryError
@@ -24,6 +25,23 @@ from config.settings import (
 )
 
 logger = get_logger(__name__, "data_fetch")
+
+StopCallback = Callable[[], bool]
+
+
+def _stop_requested(stop_requested: StopCallback | None) -> bool:
+    return bool(stop_requested and stop_requested())
+
+
+def _sleep_with_stop(seconds, stop_requested: StopCallback | None = None):
+    end_time = time.monotonic() + seconds
+    while time.monotonic() < end_time:
+        if _stop_requested(stop_requested):
+            return True
+        remaining = end_time - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(0.2, remaining))
+    return _stop_requested(stop_requested)
 
 # ----------------------------------------
 # State management
@@ -145,9 +163,13 @@ def mark_delisted(symbol, state, last_date, reason):
 # Update symbol (with retry)
 # ----------------------------------------
 
-def update_symbol(symbol, state):
+def update_symbol(symbol, state, stop_requested: StopCallback | None = None):
 
     for attempt in range(2):  # max 2 attempts
+
+        if _stop_requested(stop_requested):
+            logger.info("data_fetch_stop_before_symbol symbol=%s", symbol)
+            return False
 
         try:
 
@@ -190,6 +212,10 @@ def update_symbol(symbol, state):
             # ----------------------------------------
 
             df_new = fetch_price(symbol, start_date)
+
+            if _stop_requested(stop_requested):
+                logger.info("data_fetch_stop_after_fetch symbol=%s", symbol)
+                return False
 
             # ----------------------------------------
             # No data → delisted
@@ -289,7 +315,9 @@ def update_symbol(symbol, state):
                     symbol,
                     RATE_LIMIT_COOLDOWN,
                 )
-                time.sleep(RATE_LIMIT_COOLDOWN)
+                if _sleep_with_stop(RATE_LIMIT_COOLDOWN, stop_requested):
+                    logger.info("data_fetch_stop_during_retry_cooldown symbol=%s", symbol)
+                    return False
             else:
                 logger.warning("data_fetch_failed_after_retry symbol=%s", symbol)
 
@@ -316,9 +344,11 @@ def update_symbol(symbol, state):
 # Main
 # ----------------------------------------
 
-def main():
+def main(stop_requested: StopCallback | None = None):
 
     register_user(api_key=VNSTOCK_API_KEY)
+
+    logger.info("data_fetch_run_start")
 
     state = load_state()
 
@@ -330,14 +360,27 @@ def main():
 
     for symbol in active_symbols:
 
-        updated = update_symbol(symbol, state)
+        if _stop_requested(stop_requested):
+            logger.info("data_fetch_stopped")
+            return "stopped"
+
+        updated = update_symbol(symbol, state, stop_requested=stop_requested)
+
+        if _stop_requested(stop_requested):
+            logger.info("data_fetch_stopped")
+            return "stopped"
 
         # ----------------------------------------
         # Sleep ONLY if successful fetch
         # ----------------------------------------
 
         if updated:
-            time.sleep(FETCH_SLEEP_SECONDS)
+            if _sleep_with_stop(FETCH_SLEEP_SECONDS, stop_requested):
+                logger.info("data_fetch_stopped")
+                return "stopped"
+
+    logger.info("data_fetch_run_finish")
+    return "finished"
 
 
 if __name__ == "__main__":

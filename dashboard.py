@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import threading
 from dataclasses import asdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -155,6 +156,8 @@ def _dataset_tab() -> None:
 
 def _fetch_prices_tab() -> None:
     active_symbols = _active_symbols()
+    task = _get_fetch_prices_task()
+    is_running = _fetch_prices_is_running(task)
 
     st.subheader("Active Symbols")
     st.dataframe(
@@ -164,16 +167,41 @@ def _fetch_prices_tab() -> None:
         height=260,
     )
 
-    if st.button("Fetch Prices Data", type="primary"):
-        with st.spinner("Fetching price data..."):
-            log = _capture_file_log("data_fetch", fetch_prices.main)
+    action_col, status_col = st.columns([1, 3])
+    with action_col:
+        if st.button("Fetch Prices Data", type="primary", disabled=is_running):
+            _start_fetch_prices_worker()
+            st.rerun()
+
+    task = _get_fetch_prices_task()
+    is_running = _fetch_prices_is_running(task)
+    with status_col:
+        if is_running:
+            stopping = task.get("status") == "stopping"
+            if st.button("Stop Fetch", type="secondary", disabled=stopping):
+                _request_fetch_prices_stop(task)
+                st.rerun()
+            st.info(
+                "Stopping price fetch after the current request finishes."
+                if stopping
+                else "Price fetch is running."
+            )
+        elif task and task.get("status") == "stopping":
+            st.info("Stopping price fetch after the current request finishes.")
+
+    if task and not is_running and task.get("status") in {"finished", "failed", "stopped"}:
+        log = task.get("log", "")
         st.session_state["fetch_prices_log"] = log
-        _show_task_result(log, "Price fetch finished.")
+        if task.get("status") == "stopped":
+            st.warning("Price fetch stopped.")
+        else:
+            _show_task_result(log, "Price fetch finished.")
+        st.session_state.pop("fetch_prices_task", None)
 
     st.subheader("New Fetch Log")
     st.text_area(
         "Fetch log",
-        st.session_state.get("fetch_prices_log", ""),
+        _fetch_prices_live_log(task) if is_running or task else st.session_state.get("fetch_prices_log", ""),
         height=320,
         label_visibility="collapsed",
     )
@@ -784,6 +812,76 @@ def _capture_output(fn, *args, **kwargs) -> str:
     except Exception as exc:
         buffer.write(f"[ERROR] {exc}\n")
     return buffer.getvalue()
+
+
+def _get_fetch_prices_task() -> dict | None:
+    task = st.session_state.get("fetch_prices_task")
+    return task if isinstance(task, dict) else None
+
+
+def _fetch_prices_is_running(task: dict | None) -> bool:
+    thread = task.get("thread") if task else None
+    return bool(thread and thread.is_alive())
+
+
+def _start_fetch_prices_worker() -> None:
+    log_file = get_log_file("data_fetch")
+    stop_event = threading.Event()
+    task = {
+        "thread": None,
+        "stop_event": stop_event,
+        "before_size": log_file.stat().st_size if log_file.exists() else 0,
+        "status": "running",
+        "log": "",
+    }
+    thread = threading.Thread(target=_fetch_prices_worker, args=(task,), daemon=True)
+    task["thread"] = thread
+    st.session_state["fetch_prices_task"] = task
+    thread.start()
+
+
+def _fetch_prices_worker(task: dict) -> None:
+    stop_event = task["stop_event"]
+    log_file = get_log_file("data_fetch")
+    try:
+        result = fetch_prices.main(stop_requested=stop_event.is_set)
+        task["status"] = "stopped" if result == "stopped" else "finished"
+    except Exception as exc:
+        task["status"] = "failed"
+        task["error"] = f"[ERROR] {exc}"
+    finally:
+        log = _read_new_log(log_file, task["before_size"])
+        task["log"] = "\n".join(
+            part for part in [task.get("error", ""), log.strip()] if part
+        )
+
+
+def _request_fetch_prices_stop(task: dict | None) -> None:
+    if not task:
+        return
+    stop_event = task.get("stop_event")
+    if stop_event:
+        stop_event.set()
+    task["status"] = "stopping"
+
+
+def _fetch_prices_live_log(task: dict | None) -> str:
+    if not task:
+        return st.session_state.get("fetch_prices_log", "")
+    if task.get("log"):
+        return task["log"]
+    log_file = get_log_file("data_fetch")
+    live_log = _read_new_log(log_file, task.get("before_size", 0))
+    if task.get("status") == "stopping":
+        return "\n".join(
+            part
+            for part in [
+                "Stop requested. Waiting for the current fetch call to return.",
+                live_log,
+            ]
+            if part
+        )
+    return live_log
 
 
 def _capture_file_log(category: str, fn, *args, **kwargs) -> str:
